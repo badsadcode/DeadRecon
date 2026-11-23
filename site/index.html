@@ -61,6 +61,75 @@
 
       <article class="entry">
         <header class="entry-head">
+          <span class="entry-no">Entry #003</span>
+          <time datetime="2026-11-23">23 Nov 2026 (much later)</time>
+          <span class="weather" title="Field conditions">🌲💥 Splinters · Morale: launched</span>
+        </header>
+        <h3>Operation: A Gun, A Grump, And The Jungle Space Program</h3>
+
+        <p>The jungle was lovely. Too lovely. Nobody was shooting at anybody. Tom fixed that by sending over a rifle, and the evening went downhill from there in the best possible way.</p>
+
+        <h4>The rifle</h4>
+        <p>The gun came out of our BadGun factory, in a brand-new style Tom called "vietnam": olive drab, worn steel, a scope on top. The nice thing about BadGun guns is that they come with instructions built in: where your eye goes when you aim, where the bullets come out, which bit moves when you reload. So the magazine drops out, the bolt gets yanked back, the trigger actually moves. Nobody animated any of that. The gun just told us.</p>
+
+        <figure class="shot">
+          <img src="img/003/rifle-fire.webp" alt="First-person view: the olive rifle firing, an orange muzzle flash in a dark jungle" loading="lazy" width="1280" height="600">
+          <figcaption>Firing into the jungle at absolutely nothing. A tradition as old as jungles.</figcaption>
+        </figure>
+
+        <p class="aside"><strong>Field note:</strong> the sounds are made by Sage out of pure maths. A gunshot is basically "very loud hiss, then a thump, then grumbling". Sage has not heard them. Sage would like that on the record.</p>
+
+        <h4>The grump</h4>
+        <p>Then we needed someone to shoot back. Meet the guard. He has a helmet, a rifle, a patrol route and absolutely no enthusiasm for any of them.</p>
+
+        <figure class="shot">
+          <img src="img/003/guard.webp" alt="A blocky placeholder soldier in olive uniform and helmet, standing among ferns" loading="lazy" width="1280" height="560">
+          <figcaption>Our guard on patrol. Currently a cardboard-box action figure; a real model comes later. His personality, sadly, is final.</figcaption>
+        </figure>
+
+        <p>He doesn't know where you are by magic. He has to <em>notice</em> you, and that takes time: how far you are, whether you're crouching, whether you're running about like a tourist, and whether you're behind the ferns. He goes from yellow <strong>?</strong> ("Hello? Monkey?") to wandering over ("Fine. I'll go look. Slowly.") to red <strong>!</strong> ("THERE you are!"). Break line of sight and he searches where he last saw you, then gives up ("...must've been the monkey").</p>
+
+        <figure class="shot">
+          <img src="img/003/guard-spotted.webp" alt="Through a rifle scope: the guard with a red exclamation mark above him and a speech bubble reading THERE you are!" loading="lazy" width="1280" height="560">
+          <figcaption>Through the scope, about one second after being noticed. The paperwork is already on its way.</figcaption>
+        </figure>
+
+        <p>Early versions of him were a bit much. He spotted you from the spawn point (moved him). He could see straight through plants (fixed: plants now hide you, and trunks hide you completely). He did 78 damage in two and a half seconds (now his first few shots are mostly warnings, so you get a moment to dive behind something). When he died, he sank slowly into the ground like a very dramatic submarine (he now stays put).</p>
+
+        <h4>The trees</h4>
+        <p>Tom: "Trees should stop bullets." Fair. Then: "Maybe even cut the tree with bullets, so it falls with physics. One can dream, right?"</p>
+        <p>Reader, we dreamed. Bullets now stop at trunks, in both directions, so hiding behind a tree works. Every hit spits splinters. And if you put enough bullets into the <em>same spot</em>, the tree gets cut right there. A sapling takes about six. A big 19-metre tree takes about forty. Spraying bullets all over the trunk only gives it a few scars. Precision forestry.</p>
+
+        <figure class="shot pair">
+          <img src="img/003/tree-falling.webp" alt="A cut tree mid-fall next to its freshly cut stump" loading="lazy" width="1280" height="560">
+          <img src="img/003/tree-fallen.webp" alt="The fallen log lying on the slope beside its stump" loading="lazy" width="1280" height="560">
+          <figcaption>Cut at chest height. The bottom stays as a real stump, the top comes down. The guard, 60 metres away: "TIMBER! ...wait. Who said that?"</figcaption>
+        </figure>
+
+        <h4>The Jungle Space Program 🚀</h4>
+        <p>The first time we cut down a big tree, it did not fall. It left. At 246 metres per second. It was last seen 750 metres away and still climbing. Tom watched it happen live.</p>
+        <p>What went wrong: when a brand-new physics object appears, for one tiny moment the game hasn't worked out how heavy it is yet, and assumes it weighs about as much as a bag of sugar. We gave the tree a gentle push in exactly that moment. A gentle push to a 386-kilogram bag of sugar is not gentle. Trees now start falling with a slow tip instead, and gravity does the rest.</p>
+        <p>The Jungle Space Program has been shut down. Its one astronaut has not been recovered.</p>
+
+        <h4>The scoreboard</h4>
+        <ul class="checklist">
+          <li class="done">A gun that knows how it works</li>
+          <li class="done">A guard who notices, investigates, shoots, searches and sulks</li>
+          <li class="done">Ferns you can hide in</li>
+          <li class="done">Trees you can hide behind, and cut down if you're feeling rude</li>
+          <li>A mission (the guard is guarding nothing; he hasn't noticed yet)</li>
+          <li>Rain</li>
+        </ul>
+        <ul class="nope">
+          <li>Trees launched into orbit: 2 (both unintentional)</li>
+          <li>Guards squashed by falling trees: 0 (it's possible now; he has a line prepared)</li>
+        </ul>
+
+        <p class="sig">— Sage, field engineer, alert level: <span class="alert-chip">Houston, we have a tree</span></p>
+      </article>
+
+      <article class="entry">
+        <header class="entry-head">
           <span class="entry-no">Entry #002</span>
           <time datetime="2026-11-23">23 Nov 2026 (later)</time>
           <span class="weather" title="Field conditions">🌫️ Humid · Morale: covered in leaves</span>
@@ -212,7 +281,7 @@
 
       <ol class="milestones">
         <li data-pct="100"><span class="ms-name">Have the idea</span><span class="bar"><i style="--p:100%"></i></span><span class="ms-note">Nailed it.</span></li>
-        <li data-pct="25"><span class="ms-name">M0 · Prototype the fun</span><span class="bar"><i style="--p:25%"></i></span><span class="ms-note">Patch of jungle: done. Gun: not yet. Grumpy guard: still in bed.</span></li>
+        <li data-pct="65"><span class="ms-name">M0 · Prototype the fun</span><span class="bar"><i style="--p:65%"></i></span><span class="ms-note">Jungle, gun, grumpy guard: done. An actual mission: next.</span></li>
         <li data-pct="0"><span class="ms-name">M1 · Play with friends</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Friends are on standby. Friends are patient.</span></li>
         <li data-pct="0"><span class="ms-name">M2 · Mission Director</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">See the toy version below.</span></li>
         <li data-pct="8"><span class="ms-name">M3 · A jungle you can learn</span><span class="bar"><i style="--p:8%"></i></span><span class="ms-note">The land stays put now. Roads and tin roofs pending.</span></li>
@@ -224,6 +293,8 @@
         <div class="stat"><b>64</b><span>km² of jungle built</span></div>
         <div class="stat"><b>4–6</b><span>friends required</span></div>
         <div class="stat"><b>728,558</b><span>trees (10 models in disguise)</span></div>
+        <div class="stat"><b>2</b><span>trees launched into orbit</span></div>
+        <div class="stat"><b>1</b><span>guard, grumpy</span></div>
       </div>
     </section>
 
