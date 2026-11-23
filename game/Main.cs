@@ -18,6 +18,8 @@ public partial class Main : Node3D
 	private TerrainStreamer _terrain = null!;
 	private TreeScatter _trees = null!;
 	private GroundCover _cover = null!;
+	private Weapon _weapon = null!;
+	private Label _crosshair = null!;
 	private Walker _walker = null!;
 	private Label _hud = null!;
 	private bool _waitingForGround = true;
@@ -54,6 +56,12 @@ public partial class Main : Node3D
 		var spawn = FindSpawn();
 		_walker.GlobalPosition = spawn.position;
 		_walker.Look(spawn.yaw, -4);
+		_weapon = new Weapon { Walker = _walker };
+		_walker.Camera.AddChild(_weapon);
+		_crosshair = new Label { Text = "·", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
+		_crosshair.AddThemeFontSizeOverride("font_size", 34);
+		_crosshair.SetAnchorsPreset(Control.LayoutPreset.Center);
+		layer.AddChild(_crosshair);
 
 		_terrain = new TerrainStreamer { World = _world, Viewer = _walker };
 		_trees = new TreeScatter { World = _world, Viewer = _walker };
@@ -79,8 +87,10 @@ public partial class Main : Node3D
 			$"DEAD RECON - terrain test   {Engine.GetFramesPerSecond()} fps\n" +
 			$"pos {p.X:0} {p.Y:0} {p.Z:0}   ground {_world.HeightAt(p.X, p.Z):0} m   {(_walker.Flying ? "FLYING" : "walking")}\n" +
 			$"trees {_trees.TreesShown:N0} ({_trees.VariantCount} kinds)   undergrowth {_cover.PlantsShown:N0}   ground: {(_terrain.TextureMix > .5f ? "textured" : "painted")}\n" +
+			(_weapon.Loaded ? $"rifle {_weapon.Ammo}/20{(_weapon.Reloading ? "  reloading..." : "")}\n" : "") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space   F: fly (Space/C up/down)   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space   LMB fire  RMB aim  R reload   F: fly (Space/C up/down)   T: textured/painted ground   Esc: release mouse";
+		_crosshair.Visible = _weapon.AimAmount < .5f;
 	}
 
 	public override void _UnhandledInput(InputEvent e)
@@ -171,6 +181,35 @@ public partial class Main : Node3D
 			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, v.name + ".png"));
 			GD.Print($"shot {v.name}: fps {Engine.GetFramesPerSecond()}, trees {_trees.TreesShown}, plants {_cover.PlantsShown}, on floor {_walker.IsOnFloor()}, y {_walker.GlobalPosition.Y:0.0}");
 		}
+		// Gun: hip, aimed, firing (from the forest view).
+		var guns = new (string name, bool aim, bool flash)[] { ("6_gun_hip", false, false), ("7_gun_aim", true, false), ("8_gun_fire", false, true) };
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = start;
+		_walker.Look(startYaw + 180, -6);
+		foreach (var g in guns)
+		{
+			_weapon.ForceAim(g.aim);
+			for (int f = 0; f < 15; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			if (g.flash) { _weapon.FlashForShot(); await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, g.name + ".png"));
+			GD.Print($"shot {g.name}: weapon loaded {_weapon.Loaded}, fov {_walker.Camera.Fov:0}, scoped {_weapon.Scoped}");
+		}
+		// Bullets: look at the ground a few metres ahead, fire five rounds, photograph the holes.
+		_weapon.ForceAim(false);
+		_walker.Look(startYaw + 180, -35);
+		for (int f = 0; f < 10; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		for (int k = 0; k < 5; k++)
+		{
+			_walker.Look(startYaw + 180 + (k - 2) * 2.5f, -35 + (k % 2) * 3);
+			_weapon.TestFire();
+			for (int f = 0; f < 8; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		}
+		_walker.Look(startYaw + 180, -35);
+		for (int f = 0; f < 4; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+		GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, "9_impacts.png"));
+		GD.Print($"shot 9_impacts: ammo {_weapon.Ammo}");
 		GetTree().Quit();
 	}
 }

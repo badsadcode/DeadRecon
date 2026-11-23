@@ -11,6 +11,8 @@ public partial class Walker : CharacterBody3D
 {
     public Camera3D Camera { get; private set; } = null!;
     public bool Flying { get; private set; }
+    /// <summary>Mouse-look multiplier (the weapon lowers it while zoomed).</summary>
+    public float SensitivityScale { get; set; } = 1;
 
     private const float WalkSpeed = 4.2f, RunSpeed = 7.5f, JumpSpeed = 4.8f, Gravity = 9.81f;
     private const float FlySpeed = 40f, FlyFast = 250f, EyeHeight = 1.65f, Sensitivity = .0025f;
@@ -27,6 +29,14 @@ public partial class Walker : CharacterBody3D
     public void Look(float yawDegrees, float pitchDegrees)
     {
         _yaw = Mathf.DegToRad(yawDegrees); _pitch = Mathf.DegToRad(pitchDegrees);
+        ApplyLook();
+    }
+
+    /// <summary>Kick the view (radians): up by <paramref name="pitch"/>, sideways by <paramref name="yaw"/>.</summary>
+    public void AddRecoil(float pitch, float yaw)
+    {
+        _pitch = Math.Clamp(_pitch + pitch, -1.5f, 1.5f);
+        _yaw += yaw;
         ApplyLook();
     }
 
@@ -48,8 +58,8 @@ public partial class Walker : CharacterBody3D
         }
         else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured)
         {
-            _yaw -= motion.Relative.X * Sensitivity;
-            _pitch = Math.Clamp(_pitch - motion.Relative.Y * Sensitivity, -1.5f, 1.5f);
+            _yaw -= motion.Relative.X * Sensitivity * SensitivityScale;
+            _pitch = Math.Clamp(_pitch - motion.Relative.Y * Sensitivity * SensitivityScale, -1.5f, 1.5f);
             ApplyLook();
         }
     }
