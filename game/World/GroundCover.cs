@@ -29,10 +29,19 @@ public partial class GroundCover : Node3D
     private double _sinceUpdate = 1;
 
     public int PlantsShown { get; private set; }
+    private StandardMaterial3D _material = null!;
+
+    /// <summary>Weather: wet fronds are darker and shinier.</summary>
+    public void SetWetness(float wet)
+    {
+        if (_material == null) return;
+        _material.Roughness = Mathf.Lerp(.75f, .3f, wet);
+        _material.AlbedoColor = new Color(1 - .2f * wet, 1 - .18f * wet, 1 - .15f * wet);
+    }
 
     public override void _Ready()
     {
-        var material = new StandardMaterial3D
+        var material = _material = new StandardMaterial3D
         {
             AlbedoTexture = FrondTexture(),
             Transparency = BaseMaterial3D.TransparencyEnum.AlphaScissor, AlphaScissorThreshold = .5f,

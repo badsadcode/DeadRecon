@@ -5,6 +5,7 @@ shader_type spatial;
 render_mode cull_disabled;
 
 uniform float texture_mix : hint_range(0.0, 1.0) = 1.0;
+uniform float wetness : hint_range(0.0, 1.0) = 0.0;  // Weather: soaked ground is darker and shinier, with puddles
 uniform float tile_metres = 2.6;   // one repeat of a ground texture
 uniform float rock_metres = 5.0;
 
@@ -85,7 +86,18 @@ void fragment() {
 	t *= mix(0.8, 1.1, broad);                      // big-scale variation so distant ground isn't uniform
 	t *= 0.85;                                      // photos are brighter than a shaded jungle floor
 
-	ALBEDO = mix(painted, t, texture_mix);
-	ROUGHNESS = mix(0.93, 0.85 - 0.3 * wet_w, texture_mix);
-	SPECULAR = 0.25;
+	vec3 albedo = mix(painted, t, texture_mix);
+	float rough = mix(0.93, 0.85 - 0.3 * wet_w, texture_mix);
+
+	// Wet: darker (water fills the pores), glossier; puddles collect in flat spots, patchy.
+	float puddle = smoothstep(0.62, 0.72, noise(p * 0.09 + 31.0) * 0.7 + noise(p * 0.5) * 0.3) * smoothstep(0.93, 0.99, world_normal.y);
+	puddle *= smoothstep(0.35, 0.9, wetness) * (1.0 - rock_w);
+	albedo *= mix(1.0, 0.62, wetness * (1.0 - rock_w * 0.4));
+	rough = mix(rough, 0.35, wetness);
+	albedo = mix(albedo, albedo * 0.45 + vec3(0.02, 0.025, 0.02), puddle);
+	rough = mix(rough, 0.04, puddle);
+
+	ALBEDO = albedo;
+	ROUGHNESS = rough;
+	SPECULAR = mix(0.25, 0.5, max(wetness * 0.5, puddle));
 }

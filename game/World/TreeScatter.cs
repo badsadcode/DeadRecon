@@ -35,6 +35,17 @@ public partial class TreeScatter : Node3D
     };
 
     private readonly List<ArrayMesh[]> _variants = new(); // [variant][lod]
+    private static readonly List<(BaseMaterial3D Mat, float Rough, Color Albedo)> WetMaterials = new();
+
+    /// <summary>Weather: wet bark and leaves are darker and glossier.</summary>
+    public void SetWetness(float wet)
+    {
+        foreach (var (mat, rough, albedo) in WetMaterials)
+        {
+            mat.Roughness = Mathf.Lerp(rough, .28f, wet);
+            mat.AlbedoColor = albedo * new Color(1 - .22f * wet, 1 - .2f * wet, 1 - .18f * wet, 1);
+        }
+    }
     private readonly Dictionary<(int, int), Cell> _cells = new();
     private double _sinceUpdate = 1;
     private int _cellsPerSide;
@@ -430,6 +441,7 @@ public partial class TreeScatter : Node3D
                         bm.VertexColorUseAsAlbedo = true;
                         // Leaf cards and billboards: visible from both sides.
                         if (bm.Transparency != BaseMaterial3D.TransparencyEnum.Disabled) bm.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
+                        WetMaterials.Add((bm, bm.Roughness, bm.AlbedoColor));
                         material = bm;
                     }
                     result.SurfaceSetMaterial(result.GetSurfaceCount() - 1, material);

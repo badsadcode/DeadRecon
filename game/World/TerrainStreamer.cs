@@ -41,6 +41,13 @@ public partial class TerrainStreamer : Node3D
     public int TilesAtFullDetail { get; private set; }
     public bool HasTextures { get; private set; }
 
+    /// <summary>Weather: 0 dry .. 1 soaked (darker, shinier ground, puddles in flat spots, murkier water).</summary>
+    public void SetWetness(float wet)
+    {
+        ((ShaderMaterial)_groundMaterial).SetShaderParameter("wetness", wet);
+        _waterMaterial.Roughness = .45f - .3f * wet;
+    }
+
     /// <summary>0 = painted placeholder ground, 1 = Tom's photo textures (toggle in game to compare).</summary>
     public float TextureMix
     {

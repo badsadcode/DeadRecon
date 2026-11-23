@@ -66,6 +66,24 @@ public static class Foliage
         }
     }
 
+    /// <summary>0..1: how much open sky is straight above a point (rain, light). Crowns overhead count by how
+    /// thick they are where this point sits under them.</summary>
+    public static float SkyAbove(Vector3 at)
+    {
+        float depth = 0;
+        if (!Buckets.TryGetValue((Key(at.X), Key(at.Z)), out var list)) return 1;
+        var seen = new HashSet<Plant>();
+        foreach (var (_, p) in list)
+        {
+            if (!seen.Add(p) || p.LeafRadius <= 0 || p.BaseY + p.LeafTop < at.Y) continue;
+            float d = new Vector2(p.X - at.X, p.Z - at.Z).Length();
+            if (d >= p.LeafRadius) continue;
+            float thick = (p.LeafTop - Math.Max(p.LeafBottom, at.Y - p.BaseY)) * (1 - d / p.LeafRadius);
+            depth += Math.Max(0, thick) * p.Density;
+        }
+        return MathF.Exp(-depth);
+    }
+
     /// <summary>Plants with a trunk whose axis is within <paramref name="radius"/> m of a point (tests, tools).</summary>
     public static List<Plant> TrunksNear(Vector3 at, float radius)
     {
@@ -143,7 +161,7 @@ public static class Foliage
     {
         var d = b - a;
         float len = new Vector2(d.X, d.Z).Length();
-        if (len < .01f) return 1;
+        if (len < .005f) return 1;
         // Candidate plants: every bucket the line passes over (plants are filed in all buckets they touch).
         var candidates = Candidates(a, d);
 

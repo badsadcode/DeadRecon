@@ -19,7 +19,15 @@ public interface IDamageable
 public static class Hearing
 {
     public static event Action<Vector3, float, Node>? Made;
-    public static void Make(Vector3 at, float radius, Node source) => Made?.Invoke(at, radius, source);
+
+    /// <summary>0..1 how much rain is covering sounds (set by Weather).</summary>
+    public static float Muffle { get; set; }
+
+    /// <summary>How far a sound of this nominal radius carries right now: rain hides footsteps far more than gunfire.</summary>
+    public static float Carry(float radius) =>
+        radius * (1 - Muffle * (radius >= Gunshot ? .35f : radius < 20 ? .75f : .3f));
+
+    public static void Make(Vector3 at, float radius, Node source) => Made?.Invoke(at, Carry(radius), source);
 
     public const float Gunshot = 260, RunningSteps = 14, WalkingSteps = 6;
 }

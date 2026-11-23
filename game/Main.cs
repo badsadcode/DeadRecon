@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
 using DeadRecon.AI;
+using DeadRecon.Combat;
 using DeadRecon.Player;
 using DeadRecon.World;
 using Godot;
@@ -24,6 +25,7 @@ public partial class Main : Node3D
 	private Walker _walker = null!;
 	private Label _hud = null!;
 	private Guard _guard = null!;
+	private Weather _weather = null!;
 	private ColorRect _hurt = null!;
 	private Label _deathText = null!;
 	private (Vector3 position, float yaw) _spawn;
@@ -49,12 +51,14 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 
-		AddChild(MakeEnvironment());
-		AddChild(new DirectionalLight3D
+		var worldEnv = MakeEnvironment();
+		AddChild(worldEnv);
+		var sun = new DirectionalLight3D
 		{
 			RotationDegrees = new Vector3(-42, 35, 0), ShadowEnabled = true, LightEnergy = 1.3f,
 			LightColor = new Color(1f, .93f, .80f), DirectionalShadowMaxDistance = 200,
-		});
+		};
+		AddChild(sun);
 
 		_walker = new Walker { ProcessMode = ProcessModeEnum.Disabled };
 		AddChild(_walker);
@@ -96,12 +100,17 @@ public partial class Main : Node3D
 		AddChild(_guard);
 		_guard.GlobalPosition = home;
 
+		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
+		AddChild(_weather);
+
 		string shots = Arg("shots", "");
 		if (shots != "") _ = TakeShots(shots);
 		string aiTest = Arg("aitest", "");
 		if (aiTest != "") _ = RunAiTest(aiTest);
 		string treeTest = Arg("treetest", "");
 		if (treeTest != "") _ = RunTreeTest(treeTest);
+		string rainTest = Arg("raintest", "");
+		if (rainTest != "") _ = RunRainTest(rainTest);
 	}
 
 	public override void _Process(double delta)
@@ -120,8 +129,10 @@ public partial class Main : Node3D
 			(_weapon.Loaded ? $"rifle {_weapon.Ammo}/20{(_weapon.Reloading ? "  reloading..." : "")}\n" : "") +
 			$"health {_walker.Health:0}   guard: {GuardStatus()}\n" +
 			$"{CoverStatus()}\n" +
+			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
+			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space  Ctrl crouch   LMB fire  RMB aim  R reload   F: fly (Space/C up/down)   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space  Ctrl crouch   LMB fire  RMB aim  R reload   F: fly (Space/C up/down)   N: weather   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = _walker.Dead;
 		_crosshair.Visible = _weapon.AimAmount < .5f;
@@ -129,6 +140,8 @@ public partial class Main : Node3D
 
 	public override void _UnhandledInput(InputEvent e)
 	{
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.N } && _weather != null)
+			_weather.Cycle();
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.T } && _terrain != null)
 			_terrain.TextureMix = _terrain.TextureMix > .5f ? 0 : 1;
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _walker is { Dead: true })
@@ -246,6 +259,69 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>
+	/// Automated rain check: the same views dry, in rain and in a storm (with a lightning flash), plus the gameplay
+	/// numbers (how far footsteps and gunshots carry, how far the guard sees). Screenshots + log, then quit.
+	/// </summary>
+	/// <summary>Offset from the spawn to the spot within 40 m with the thickest canopy overhead.</summary>
+	private Vector3 ForestSpot(Vector3 from)
+	{
+		Vector3 best = Vector3.Zero; float least = 2;
+		for (int k = 0; k < 120; k++)
+		{
+			float a = k * 2.4f, r = 6 + k * .3f;
+			var o = new Vector3(MathF.Cos(a) * r, 0, MathF.Sin(a) * r);
+			var p = from + o; p.Y = _world.HeightAt(p.X, p.Z) + 1.6f;
+			float sky = Foliage.SkyAbove(p);
+			if (sky < least) { least = sky; best = new Vector3(o.X, _world.HeightAt(p.X, p.Z) + .2f - from.Y, o.Z); }
+		}
+		return best;
+	}
+
+	private async Task RunRainTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}: {Engine.GetFramesPerSecond()} fps, weather {_weather.Describe()} rain {_weather.Intensity:0.00} wet {_weather.Wetness:0.00} canopy {_weather.UnderCanopy:0.00}");
+		}
+		_weather.AutoChange = false;
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		var start = _walker.GlobalPosition;
+		float yaw = Mathf.RadToDeg(_walker.Rotation.Y);
+		var views = new (string name, Vector3 offset, float yaw, float pitch, bool fly)[]
+		{
+			("river", Vector3.Zero, yaw, -8, false),            // open view toward the river: rain streaks, wet bank
+			("forest", ForestSpot(start), yaw + 180, -4, false), // under the canopy: much less rain gets through
+			("ground", Vector3.Zero, yaw + 150, -40, false),    // looking down: wet litter, puddles, splashes
+		};
+		foreach (var (kind, label) in new[] { (Weather.Kind.Clear, "dry"), (Weather.Kind.Rain, "rain"), (Weather.Kind.Storm, "storm") })
+		{
+			_weather.SetNow(kind);
+			GD.Print($"[rain] {label}: running steps carry {Hearing.Carry(Hearing.RunningSteps):0.0} m (of {Hearing.RunningSteps}), walking {Hearing.Carry(Hearing.WalkingSteps):0.0} m, " +
+			         $"gunshot {Hearing.Carry(Hearing.Gunshot):0} m, tree crash {Hearing.Carry(140):0} m; guard sight x{_weather.SightFactor:0.00}");
+			foreach (var v in views)
+			{
+				_walker.SetFlying(v.fly);
+				_walker.GlobalPosition = start + v.offset;
+				_walker.Look(v.yaw, v.pitch);
+				await Frames(45); // let the drops fill the air
+				await Shot($"{label}_{v.name}");
+			}
+		}
+		// A lightning flash, caught mid-flicker.
+		_walker.Look(yaw, 5);
+		await Frames(20);
+		_weather.Strike(800);
+		await Frames(2);
+		await Shot("storm_lightning");
+		GD.Print($"[test] done: {_weather.LightningStrikes} strikes");
 		GetTree().Quit();
 	}
 
