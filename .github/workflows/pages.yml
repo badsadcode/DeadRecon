@@ -1,4 +1,6 @@
 # Publishes the devlog in /site to GitHub Pages on every push to main.
+# Two jobs (upload, then deploy) like GitHub's own template: deploying in the same job as the upload sometimes ran
+# before GitHub had registered the artifact ("No artifacts named github-pages were found").
 name: Deploy devlog to Pages
 
 on:
@@ -17,16 +19,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v4
