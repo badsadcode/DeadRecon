@@ -8,7 +8,7 @@ bin/
 obj/
 
 # Baked world output (reproducible from content/world/*.world.json; ~65 MB per 8 km test region)
-world/
+/world/
 
 # Tree assets: not committed until re-exported (textures are duplicated per LOD, ~141 MB); consider Git LFS
 assets/

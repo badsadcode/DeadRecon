@@ -1,0 +1,32 @@
+{
+  "_comment": "Recipe for the persistent DeadRecon world. The baker generates a larger landmass and bakes a square region from its interior, so the playable map is mainland (no forced ocean border) and rivers still drain to a real sea off-map. Change anything here => re-bake => a different world. Keep the seed once we like it.",
+  "Name": "jungle",
+  "Seed": 7,
+  "RasterSize": 1024,
+  "RegionSize": 8192,
+  "Spacing": 2,
+  "TileSize": 1024,
+  "RegionCenter": null,
+  "Profile": {
+    "Id": "deadrecon-jungle",
+    "Name": "Dead Recon jungle mainland",
+    "WorldSize": 160000,
+    "Continents": 1,
+    "Islands": 0,
+    "ContinentRadius": 44000,
+    "IslandRadius": 1000,
+    "CoastRoughness": 0.15,
+    "SeaLevel": 0,
+    "OceanDepth": 800,
+    "LowlandHeight": 60,
+    "HillHeight": 260,
+    "HillScale": 4000,
+    "RangesPerContinent": 3,
+    "MountainHeight": 1800,
+    "MountainWidth": 9000
+  },
+  "Style": {
+    "RiverMinCatchmentKm2": 4,
+    "Climate": { "CentreLatitude": 12, "Moisture": 1.5 }
+  }
+}
