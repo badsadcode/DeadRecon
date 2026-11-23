@@ -1,0 +1,391 @@
+using System;
+using System.Linq;
+using System.Runtime.CompilerServices;
+using System.Threading.Tasks;
+
+namespace DeadRecon.WorldGen;
+
+/// <summary>Terrain facts at one position.</summary>
+public readonly record struct TerrainSample(
+    double Height,       // metres, absolute (sea level = profile SeaLevel)
+    double Land,         // land influence after coast detail: > 0 land, ≤ 0 sea
+    double Mountain,     // 0..1 share of profile mountain height
+    double Detail,       // metres of walking-scale relief included in Height
+    WaterKind Water,     // water body covering this point (None if dry)
+    double WaterLevel,   // absolute surface elevation of that water (NaN if dry)
+    int WaterBody,       // lake id or river reach id (-1 for sea / none)
+    double Plume = 0,    // 0..1 river water mixing into a lake or the sea near a mouth (shading)
+    double Lava = 0,     // 0..1 how much lava covers the ground here (revision 31: an active volcano's lake and fresh flows;
+                         // D257: the game draws it as its own surface and nothing grows in it)
+    double Scree = 0);   // 0..1 loose rock fallen from a wall above (revision 33, D263: escarpments' debris slopes, the talus
+                         // at the foot of gorge, canyon and trough walls) — the game strews stones and boulders over it
+
+/// <summary>
+/// The terrain authority for generated (unedited) ground: a pure, thread-safe function of world position.
+/// <para>height = macro raster (A4 land influence, hills + mountain relief, mountain share) + sub-raster coast
+/// detail + walking-scale eroded detail (lowland) and ridged rock detail (mountains).</para>
+/// <para><c>minWavelength</c> is the LOD knob: detail octaves shorter than it are skipped (and the last one
+/// faded), so a coarse distant tile is the near terrain minus small bumps. Use about twice the vertex spacing.</para>
+/// <para>The height pipeline (D227), one method per stage, water last so it carves through everything before it:</para>
+/// <code>
+/// stage                      file                       terrain revisions that changed it
+/// 1a Coast                   TerrainSampler.cs          -
+/// 1b Sea (ends the walk)     TerrainSampler.cs          16 (a sea pocket inside a lake's reach is lake)
+/// 1c Continent               TerrainSampler.cs          21 (canyons' raise, Canyons.cs), 24 (glacial troughs, Troughs.cs)
+///                                                       (ShoreSlope, MouthBlend: build 5 / preview 7 options)
+/// 2  Detail                  TerrainSampler.cs          18 (big landforms' walking-scale part: escarpment faces)
+/// 3  BiomeTerrain            TerrainSampler.cs          11 (wetlands), 12 (all biomes; landforms: BiomeLandforms.cs),
+///                                                       17 (landform module settings, LandformModules.cs), 23 (cirques)
+/// 3b Sites, 3c Roads         (none yet)                 17 (the plan's lists exist, still empty: docs/WORLDGEN_PLAN.md step 3)
+/// 4  Rivers                  TerrainSampler.Water.cs    9 (blended along, river profiles), 13 (tributaries on floodplains),
+///                                                       20 (gorges below waterfalls), 21 (canyons, walls with ledges)
+/// 5  Lakes                   TerrainSampler.Water.cs    10 (fill within reach, low shore), 15 (a river in a lake is lake),
+///                                                       23 (cirque tarns, Cirques.cs)
+/// 6  Pools                   TerrainSampler.Water.cs    11, 12 (shore stretch, seam fade, grow), 14 (mask is water, size ladder),
+///                                                       22 (none on ground a river has cut down)
+/// 7  PlayerEdits             TerrainSampler.Water.cs    -
+/// </code>
+/// <para>Each stage takes and gives plain values (a shared struct cost ~2.5 % of the speed).</para>
+/// </summary>
+public sealed partial class TerrainSampler
+{
+    public WorldPlan Plan { get; }
+    /// <summary>Player edits on top of the generated ground (empty for a fresh world: no cost, identical output).</summary>
+    public TerrainEdits Edits { get; } = new();
+    /// <summary>Generated objects taken out of the world (felled trees), by their lattice cell.</summary>
+    public ObjectRemovals Removals { get; } = new();
+    /// <summary>Generated objects this PC draws itself for a while (a tree shaking and falling): left out of the batches.
+    /// Local only, never sent.</summary>
+    public ObjectRemovals Hidden { get; } = new();
+    private readonly WorldProfile _p;
+    private readonly TerrainStyle _style;
+    private readonly MacroRaster _macro;
+    private readonly Hydrology _hydrology;
+    private readonly double _ox, _oz;
+    private readonly ulong _detailSeed, _rockSeed, _coastSeed, _regionSeed, _bankSeed, _poolSeed, _landformSeed;
+    private readonly double _duneAngle;
+    private readonly BiomeLandforms _landforms;
+    private readonly PlanLandform[] _planForms;
+    private readonly Canyons? _canyons;
+    private readonly Cirques? _cirques;
+    private readonly Troughs? _troughs;
+    private readonly Volcanoes? _volcanoes;
+    private readonly Headlands? _headlands;
+    private readonly Spits? _spits;
+    private readonly Oxbows? _oxbows;
+    private readonly Terraces? _terraces;
+    private readonly FallLips? _fallLips;
+    private readonly Fans? _fans;
+    // Wetland pools: sorted samples of the pool and channel noise (unit standard deviation), to turn a coverage share
+    // into a threshold.
+    private readonly double[] _poolQuantiles, _channelQuantiles;
+    private readonly double _poolStd, _channelStd;
+    private readonly double _coastBand;
+
+    public TerrainSampler(WorldPlan plan)
+    {
+        Plan = plan; _p = plan.Profile; _style = plan.Style; _macro = plan.Macro; _hydrology = plan.Hydrology;
+        _ox = plan.Manifest.OriginX; _oz = plan.Manifest.OriginZ;
+        var m = plan.Manifest;
+        ulong Seed(string layer) => Hashing.FeatureSeed(m.Seed, 100 + WorldManifest.CurrentGenerator, m.ProfileDigest, layer);
+        _detailSeed = Seed("detail"); _rockSeed = Seed("rock"); _coastSeed = Seed("coast"); _regionSeed = Seed("region"); _bankSeed = Seed("banks");
+        _poolSeed = Seed("pools");
+        _landformSeed = Seed("landforms");
+        _duneAngle = Hashing.Unit(Hashing.Mix(_landformSeed)) * Math.Tau; // prevailing sand-moving wind of this world
+        _landforms = new BiomeLandforms(_hydrology, _landformSeed, _duneAngle, _style);
+        _planForms = plan.PlanLandforms.ToArray();
+        _canyons = plan.Canyons is { Count: > 0 } c ? c : null;
+        _cirques = plan.Cirques is { Count: > 0 } q ? q : null;
+        _troughs = plan.Troughs is { Count: > 0 } t ? t : null;
+        _volcanoes = _planForms.OfType<Volcanoes>().FirstOrDefault(v => v.Count > 0);
+        _headlands = plan.Headlands is { Count: > 0 } h ? h : null;
+        _spits = plan.Spits is { Count: > 0 } sp ? sp : null;
+        _oxbows = plan.Oxbows is { Count: > 0 } ob ? ob : null;
+        _terraces = plan.Terraces;
+        _fallLips = plan.FallLips is { Count: > 0 } fl ? fl : null;
+        _fans = plan.Fans is { Count: > 0 } fa ? fa : null;
+        (_poolQuantiles, _poolStd) = Quantiles((u, v) => PoolNoise(u, v, 1, 0));
+        (_channelQuantiles, _channelStd) = Quantiles((u, v) => ChannelNoise(u, v, 1, 0));
+        // Coast detail is only evaluated where it can change the land/sea decision or the shore profile.
+        _coastBand = .25;
+    }
+
+    /// <summary>The big landforms' walking-scale relief (revision 18). Ground they lower is faded at lake shores (lowered
+    /// ground just outside a lake's reach would lie dry below its surface); ground they raise may end a lake at a cliff.
+    /// <paramref name="bare"/>: how bare their rock and scree is (reported as mountain ground, so it gets rock and scree
+    /// textures and no forest).</summary>
+    private double PlanGround(double x, double z, double minWavelength, out double bare, out double scree)
+    {
+        double g = 0;
+        bare = 0; scree = 0;
+        foreach (var form in _planForms) { g += form.Ground(x, z, minWavelength, out double rock, out double s); bare = Math.Max(bare, rock); scree = Math.Max(scree, s); }
+        if (g >= 0) return g;
+        int lake = _hydrology.LakeDistance(x, z, out double cells);
+        return lake >= 0 ? g * DetMath.Smooth((cells - 1.6) / .38) : g;
+    }
+
+    private Lazy<SeaStacks?>? _seaStacks;
+
+    /// <summary>Sea stacks and arches (revision 35, landform no. 9): placed from this terrain the first time they are
+    /// asked for (a few thousand samples); null when off or older.</summary>
+    public SeaStacks? SeaStacks => (_seaStacks ??= new Lazy<SeaStacks?>(() =>
+        _style.Revision >= LandformCatalog.SeaStacks.Since && !_style.Landform(LandformCatalog.SeaStacks.Id).Off
+            ? new SeaStacks(this, _style.Landform(LandformCatalog.SeaStacks.Id)) : null)).Value;
+
+    public double Height(double x, double z, double minWavelength = 2) => Sample(x, z, minWavelength).Height;
+
+    public TerrainSample Sample(double x, double z, double minWavelength = 2)
+    {
+        // The height pipeline (D227): each stage adds to the point and hands it on; water comes last, so rivers and lakes
+        // carve through everything before them ("water always wins"). The sea ends the walk at the coast stage.
+        // (each stage takes and gives plain values — a shared struct cost ~2.5 % of the speed)
+        double lx = x - _ox, lz = z - _oz;
+        Coast(x, z, lx, lz, minWavelength, out double land, out double macroHeight, out double mountainShare, out double rasterLand, out double coastDistance, out double point, out double cove, out double coastMoved);
+        if (land <= 0) return Sea(x, z, land, coastDistance, rasterLand);
+        double baseHeight = Continent(land, rasterLand, macroHeight, coastDistance, ref mountainShare);
+        // Revision 36: headlands' cliffs and coves' beaches.
+        double pointRock = 0;
+        if (point > 0 || cove > 0 || coastMoved != 0)
+            baseHeight = Headlands.Relief(x, z, minWavelength, baseHeight, point, cove, coastDistance, out pointRock, _style.Revision >= 38, coastMoved);
+        double canyon = _canyons != null ? _canyons.Uplift(x, z) : 0; // (revision 21: raised land a river has cut through)
+        baseHeight += canyon;
+        // Revision 26: a fjord's mountain walls, raised like a canyon's land (rivers crossing them cut gorges).
+        if (_troughs is { HasFjords: true })
+        {
+            double lift = _troughs.Raise(x, z, coastDistance, out double rocky);
+            baseHeight += lift; canyon += lift;
+            if (rocky > 0) mountainShare = Math.Max(mountainShare, .5 * rocky * rocky); // (rugged near the walls, easing out: at once it drew a patch)
+        }
+        // Revision 24: glacial troughs, the ground taken down to a flat floor between steep walls (most of the
+        // walking-scale relief taken off the floor).
+        double troughFlat = 0, troughRock = 0, scree = 0; bool fjord = false;
+        if (_troughs != null) baseHeight = _troughs.Carve(x, z, baseHeight, out troughFlat, out troughRock, out fjord, out scree);
+        // Revision 41: alluvial fans lay gravel on the plain at mountain fronts (before the rivers, which cut through).
+        if (_fans != null) { baseHeight = _fans.Fill(x, z, baseHeight, out double gravel); scree = Math.Max(scree, gravel); }
+        Detail(lx, lz, minWavelength, land, mountainShare, out double inland, out double detail, out double roughness);
+        if (troughFlat > 0) detail *= 1 - .85 * troughFlat;
+        // Revision 26: a fjord's floor below the sea is the sea (the walk ends here, as at the coast: rivers, lakes and
+        // pools have nothing to do under it).
+        if (fjord && baseHeight + detail < 0)
+            return new(_p.SeaLevel + baseHeight + detail, land, Math.Max(mountainShare, troughRock), detail, WaterKind.Ocean, _p.SeaLevel, -1, 0);
+        double bare = 0;
+        if (_planForms.Length > 0) { detail += PlanGround(x, z, minWavelength, out bare, out double planScree); scree = Math.Max(scree, planScree); }
+        bare = Math.Max(Math.Max(bare, troughRock), pointRock);
+        scree = Math.Max(scree, pointRock); // (a point's bare rock draws as loose rock: on gentle ground the terrain's bare rock needs a slope)
+        double beforeBiome = detail;
+        BiomeTerrain(x, z, lx, lz, minWavelength, baseHeight, inland, ref detail, out bool wetland, out double poolCover, out double poolDepth,
+            out double poolSize, out double poolChannels, out double flatten);
+        // Revision 34 (D265): a glacial trough's floor is scoured flat of the biome's landforms too, as of the rest of the
+        // walking-scale relief (badlands climbing a caldera's flank onto a trough's floor stood 30–50 m of needles on it).
+        if (troughFlat > 0 && _style.Revision >= 34) detail = beforeBiome + (detail - beforeBiome) * (1 - .85 * troughFlat);
+        // Revision 23: cirques, carved after the biome's landforms so their tarns win (a mesa at its largest raised a
+        // tarn's floor 67 m over its water).
+        if (_cirques != null) detail += _cirques.Carve(x, z, baseHeight + detail, detail);
+        // (3b sites and 3c roads come here once the plan has any: pads and corridors after the landforms, before the
+        // water, so rivers and lakes still win. Plan.Sites and Plan.Roads are empty in revision 17.)
+        var water = WaterKind.None; double level = double.NaN; int body = -1; double riverDamp = 1;
+        if (_terraces != null) t_terraced = 0;
+        double height = Rivers(x, z, minWavelength, baseHeight, inland, detail, ref riverDamp, ref water, ref level, ref body, ref scree, Canyons.Wall(canyon));
+        // Revision 33: a gorge's talus is bare ground as the escarpments' debris slopes are (scree, not cliff rock).
+        bare = Math.Max(bare, .65 * scree);
+        // Revision 43 (D300): a rock face at each fall's lip and a plunge pool below it, filled to the foot's level (the river's
+        // ramp of water over the drop is the pool there).
+        double fallPool = double.NaN; int fallReach = -1;
+        if (_fallLips is { Faces: true })
+        {
+            height = _fallLips.Pool(x, z, height, _p.SeaLevel, water == WaterKind.River ? level : double.NaN, water == WaterKind.River ? body : -1,
+                water == WaterKind.None, out double poolLevel, out int poolReach, out double faceRock, out bool onSlope);
+            bare = Math.Max(bare, faceRock);
+            // (revision 44, D301: the river's water on a fall's slope takes the lip's level above the face, the pool's below)
+            if (!double.IsNaN(poolLevel) && (water == WaterKind.None || water == WaterKind.River && (level > poolLevel || onSlope)))
+            {
+                water = WaterKind.River; level = poolLevel; body = poolReach;
+                if (_fallLips.Follow) { fallPool = poolLevel; fallReach = poolReach; }
+            }
+            else if (onSlope && water == WaterKind.River) { water = WaterKind.None; level = double.NaN; body = -1; } // (beside the lip: dry, a bank)
+        }
+        // Revision 42 (D297): banks of rock beside waterfall lips (dry ground only: the river's channel and water unchanged).
+        if (_fallLips != null && water == WaterKind.None) { height = _fallLips.Apply(x, z, height, _p.SeaLevel, out double lipRock); bare = Math.Max(bare, lipRock); }
+        double lakePlume = 0, lakeCells = double.PositiveInfinity;
+        Lakes(x, z, ref height, ref water, ref level, ref body, ref lakePlume, ref lakeCells);
+        // Revision 44 (D301): a fall's pool keeps its water where a lake above the lip would flood it (the lowered pool lay below
+        // the lake's level, and the lake's water there was cut away as the fall's — a dry floor under the falling water).
+        if (!double.IsNaN(fallPool) && water == WaterKind.Lake && level > fallPool + .05) { water = WaterKind.River; level = fallPool; body = fallReach; }
+        // Revision 23: a cirque's tarn, still water of its own (drawn as a pond), where nothing else is water.
+        if (_cirques != null && water == WaterKind.None && _cirques.Tarn(x, z, height, out double tarn)) { water = WaterKind.Pond; level = tarn; }
+        // Revision 39: oxbow lakes, still water of their own beside lowland rivers (drawn as ponds), where nothing else is water.
+        bool oxbowNear = false;
+        if (_oxbows != null && water == WaterKind.None && _oxbows.Apply(x, z, ref height, out double oxbow, out oxbowNear)) { water = WaterKind.Pond; level = oxbow; }
+        // Revision 29: a caldera's lake fills all of its floor below the water.
+        if (_volcanoes != null && water == WaterKind.None && _volcanoes.InCaldera(x, z, out double cx, out double cz)
+            && _hydrology.LakeNear(cx, cz) is >= 0 and var caldera && height < _hydrology.Lakes[caldera].Level - _p.SeaLevel)
+        { water = WaterKind.Lake; level = _hydrology.Lakes[caldera].Level; body = caldera; }
+        // Revision 31: an active volcano's lava lake, a level surface of molten rock (the game draws it glowing).
+        if (_volcanoes != null && water == WaterKind.None && _volcanoes.LavaLake(x, z, height, out double lava)) height = lava;
+        // Revision 28: a quiet volcano's crater lake.
+        if (_volcanoes != null && water == WaterKind.None && _volcanoes.CraterLake(x, z, height, out double crater)) { water = WaterKind.Pond; level = crater; }
+        // Revision 22: no pools where a river has cut the ground down by over 2 m (valley sides, canyon and gorge walls),
+        // against the ground as the river stage sees it (the walking-scale relief is damped near rivers: big landforms
+        // there are not a cut). Pools filled the flat ledges of canyon walls (Tom's dump 21:59:22, build 118).
+        // Revision 40: the pools fade out where river terraces cut the ground (D282).
+        if (_terraces != null) poolCover *= 1 - t_terraced;
+        if (wetland && poolCover > 0 && water == WaterKind.None && !oxbowNear && (_style.Revision < 22 || baseHeight + detail * riverDamp - height < 2))
+            Pools(lx, lz, x, z, minWavelength, baseHeight, roughness, mountainShare, inland, flatten, land, riverDamp, lakeCells, poolCover,
+                poolDepth, poolSize, poolChannels, ref height, ref water, ref level);
+        PlayerEdits(x, z, ref height, ref water, ref level, ref body);
+        double lavaCover = 0;
+        if (_volcanoes != null && water == WaterKind.None) { lavaCover = _volcanoes.LavaAt(x, z).Cover; }
+        if (water != WaterKind.None) scree = 0;
+        return new(_p.SeaLevel + height, land, bare > 0 ? Math.Max(mountainShare, bare) : mountainShare, detail, water, level, body, lakePlume, lavaCover, scree);
+    }
+
+    /// <summary>Stage 1a, coast: the macro raster (land, eroded height, mountain share) and the sub-raster coastline wiggle.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] // (the split must not cost speed, D227)
+    private void Coast(double x, double z, double lx, double lz, double minWavelength, out double land, out double macroHeight, out double mountainShare,
+        out double rasterLand, out double coastDistance, out double point, out double cove, out double coastMoved)
+    {
+        point = 0; cove = 0; coastMoved = 0;
+        _macro.Sample(x, z, WorldPlan.LandChannel, WorldPlan.HeightChannel, WorldPlan.MountainChannel, out land, out macroHeight, out mountainShare);
+        rasterLand = land;
+        // Sub-raster coastline: shift the coast sideways by a fractal distance (metres), converted to land
+        // influence through the local gradient so continents and small islands get the same metric wiggle.
+        coastDistance = double.PositiveInfinity; // metres from the detailed coastline (estimate)
+        if (land > -_coastBand && land < _coastBand)
+        {
+            _macro.SampleGradient(WorldPlan.LandChannel, x, z, out double gx, out double gz);
+            double gradient = Math.Sqrt(gx * gx + gz * gz);
+            double shift = _style.CoastDetailShift * Noise.Fbm(lx, lz, _macro.Cell * 2.5, 7, minWavelength, _coastSeed, .55);
+            // Revision 36: headlands and coves move the coastline further, the same way.
+            if (_headlands != null) { coastMoved = _headlands.Shift(x, z, out point, out cove); shift += coastMoved; }
+            land += shift * gradient * DetMath.Smooth(1 - Math.Abs(land) / _coastBand); // fades out: no step at the band edge
+            coastDistance = Math.Abs(land) / Math.Max(gradient, 1e-12);
+        }
+    }
+
+    /// <summary>Stage 1b, the sea: the sea floor (deepening off the coast, river mouths' channels) — the walk ends here.</summary>
+    private TerrainSample Sea(double x, double z, double land, double coastDistance, double rasterLand)
+    {
+        // Shore profile (ShoreSlope > 0): the macro ramp alone left hundreds of metres of ankle-deep water and flat
+        // beach at this world scale. A beach-like slope (~3.5 %) takes the sea floor to ~25 m within a few hundred
+        // metres and lifts the land a few metres within ~150 m; beyond, the macro shape takes over.
+        double shore = _style.ShoreSlope;
+
+        double depth = _p.OceanDepth * DetMath.Smooth(-land / .6);
+        if (shore > 0 && coastDistance < 1e7) depth = Math.Max(depth, 25 * (1 - DetMath.Exp(-coastDistance * .035 * shore / 25)));
+        double seabed = _p.SeaLevel - depth, plume = 0;
+        // Revision 27: islands and skerries off a fjord coast.
+        double isle = _troughs is { HasCoasts: true } ? _troughs.Skerries(x, z, land) : 0;
+        seabed += isle;
+        // Revision 37: spits, sandbars and lagoons, placed by their distance from the plan's coastline.
+        if (_spits != null && rasterLand > -_coastBand)
+        {
+            _macro.SampleGradient(WorldPlan.LandChannel, x, z, out double gx, out double gz);
+            double gradient = Math.Sqrt(gx * gx + gz * gz);
+            if (gradient > 1e-12) seabed = _p.SeaLevel + _spits.Seabed(x, z, Math.Max(0, -rasterLand) / gradient, seabed - _p.SeaLevel);
+        }
+        if (_style.MouthBlend > 0) seabed = MouthChannel(x, z, seabed, -1, out plume);
+        seabed += Edits.Delta(x, z);
+        // Revision 16: the coastline wiggle can cut a small pocket of "sea" out of a lake basin near the coast; the
+        // sea's level then punched a hole in the lake, a crater with 13 m walls of water in Tom's dump 182351
+        // (benchmark lake, level 13 m, ground -2.1 m). Inside a lake's reach the pocket is part of the lake.
+        if (_style.Revision >= 16)
+        {
+            int lake = _hydrology.LakeDistance(x, z, out double cells);
+            if (lake >= 0 && cells < 1.6 && _hydrology.Lakes[lake].Level > _p.SeaLevel + .05 && seabed < _hydrology.Lakes[lake].Level)
+                return new(seabed, land, 0, 0, WaterKind.Lake, _hydrology.Lakes[lake].Level, lake, 0);
+        }
+        return seabed < _p.SeaLevel ? new(seabed, land, 0, 0, WaterKind.Ocean, _p.SeaLevel, -1, plume)
+            : new(seabed, land, isle > 0 ? .5 : 0, 0, WaterKind.None, double.NaN, -1);
+    }
+
+    /// <summary>Stage 1c, continent: the land's base height from the eroded macro height and the shore ramp.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] // (the split must not cost speed, D227)
+    private double Continent(double land, double rasterLand, double macroHeight, double coastDistance, ref double mountainShare)
+    {
+        double shore = _style.ShoreSlope;
+        // Eroded macro height; the coastal ramp follows the detailed coastline rather than the raster's.
+        double baseHeight = macroHeight + _p.LowlandHeight * (DetMath.Smooth(land / .4) - DetMath.Smooth(rasterLand / .4));
+        baseHeight = Math.Max(_p.LowlandHeight * DetMath.Smooth(land / .08) * .05, baseHeight);
+        if (shore > 0 && coastDistance < 1e7) baseHeight = Math.Max(baseHeight, 3.5 * (1 - DetMath.Exp(-coastDistance * .025 * shore / 3.5)));
+        mountainShare = DetMath.Clamp(mountainShare, 0, 1);
+        return baseHeight;
+    }
+
+    /// <summary>Stage 2, detail: walking-scale relief (rolling hills by regional character, rock ridges in the mountains),
+    /// fading out at the shoreline.</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] // (the split must not cost speed, D227)
+    private void Detail(double lx, double lz, double minWavelength, double land, double mountainShare, out double inland, out double detail,
+        out double roughness)
+    {
+        // Walking-scale relief. Fades out at the shoreline so beaches and shelves stay smooth.
+        inland = DetMath.Smooth(land / .03);
+        detail = 0; roughness = 1;
+        if (inland > 0)
+        {
+            // Regional character: broad plains in some places, rougher hill country in others (Supplement §3),
+            // varying over tens of kilometres so it never reads as a repeating texture.
+            double character = DetMath.Smooth(.5 + .9 * Noise.Fbm(lx, lz, _style.RegionWavelength, 3, minWavelength, _regionSeed));
+            roughness = _style.PlainsRoughness + (1 - _style.PlainsRoughness) * character;
+            double rolling = Noise.ErodedFbm(lx, lz, _style.DetailWavelength, 11, minWavelength, _detailSeed, _style.DetailGain);
+            detail = rolling * _style.LowlandDetail * roughness * (1 + 2 * mountainShare);
+            if (mountainShare > .02)
+            {
+                double ridges = Noise.Ridged(lx, lz, 900, 8, minWavelength, _rockSeed, .5) - .3;
+                detail += ridges * _style.MountainDetail * _p.MountainHeight * DetMath.Smooth(mountainShare / .6);
+            }
+            detail *= inland;
+        }
+    }
+
+    /// <summary>Stage 3, biome terrain and landforms: wetland flattening and pool settings, then the biome landforms
+    /// (dunes, mesas, spires — <see cref="BiomeLandforms"/>).</summary>
+    [MethodImpl(MethodImplOptions.AggressiveInlining)] // (the split must not cost speed, D227)
+    private void BiomeTerrain(double x, double z, double lx, double lz, double minWavelength, double baseHeight, double inland, ref double detail,
+        out bool wetland, out double poolCover, out double poolDepth, out double poolSize, out double poolChannels, out double flatten)
+    {
+        // Wetlands (revision 11): biomes with standing-water pools or flattened ground (swamps, marshes, fens, bayous).
+        wetland = false;
+        poolCover = 0; poolDepth = 0; poolSize = 16; poolChannels = 0; flatten = 0;
+        BiomeTerrainMods mods = default;
+        if (_style.Revision >= 11 && inland > 0 && Plan.Biomes is { } biomes)
+        {
+            wetland = biomes.TerrainAt(x, z, out mods, allBiomes: _style.Revision >= 12);
+            poolCover = mods.Pools; poolDepth = mods.PoolDepth; poolSize = mods.PoolSize; poolChannels = mods.PoolChannels; flatten = mods.Flatten;
+            // Where there are pools the ground is flatter still (to ~8 % of the relief), so their surfaces stay level.
+            if (poolCover > 0) flatten = Math.Max(flatten, Math.Min(.92, flatten + poolCover));
+            if (wetland) detail *= 1 - flatten;
+        }
+        // Landforms (revision 12, round 9): dunes, mesas and needle spires from the biomes' Terrain.Features.
+        if (_style.Revision >= 12 && wetland && mods.Dunes + mods.Mesas + mods.Spires > 0)
+            detail = _landforms.Apply(x, z, lx, lz, baseHeight, detail, inland, minWavelength, mods);
+    }
+
+    /// <summary>Terrain without walking-scale detail (macro shape only), for comparisons and maps.</summary>
+    public double MacroHeight(double x, double z) => Sample(x, z, double.PositiveInfinity).Height;
+
+    /// <summary>
+    /// Fill a regular grid (row-major, <paramref name="nx"/> fastest) with heights. Each value is bit-identical
+    /// to <see cref="Height"/> at that point, so neighbouring tiles always share exact edges.
+    /// </summary>
+    public void HeightGrid(double x0, double z0, double spacing, int nx, int nz, Span<double> output, double minWavelength = -1)
+    {
+        if (output.Length < nx * nz) throw new ArgumentException("Output too small.", nameof(output));
+        double mw = minWavelength < 0 ? spacing * 2 : minWavelength;
+        for (int j = 0; j < nz; j++)
+        {
+            double z = z0 + j * spacing;
+            for (int i = 0; i < nx; i++) output[j * nx + i] = Sample(x0 + i * spacing, z, mw).Height;
+        }
+    }
+
+    /// <summary>Parallel <see cref="HeightGrid"/> for large requests (maps, raster previews).</summary>
+    public void HeightGridParallel(double x0, double z0, double spacing, int nx, int nz, double[] output, double minWavelength = -1)
+    {
+        double mw = minWavelength < 0 ? spacing * 2 : minWavelength;
+        Parallel.For(0, nz, j =>
+        {
+            double z = z0 + j * spacing;
+            for (int i = 0; i < nx; i++) output[j * nx + i] = Sample(x0 + i * spacing, z, mw).Height;
+        });
+    }
+}

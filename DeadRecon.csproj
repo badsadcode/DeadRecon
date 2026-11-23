@@ -1,0 +1,14 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <RootNamespace>DeadRecon</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Command-line tools and tests are their own projects; the game only compiles src/ and game/. -->
+    <Compile Remove="tools/**" />
+    <Compile Remove="tests/**" />
+  </ItemGroup>
+</Project>

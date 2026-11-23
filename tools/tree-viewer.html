@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tree Viewer</title>
+<!-- Dev tool: serve the repo root (python -m http.server) and open /tools/tree-viewer.html -->
+<script type="module" src="https://unpkg.com/@google/model-viewer@3.5.0/dist/model-viewer.min.js"></script>
+<style>
+  body { margin: 0; background: #0f1a12; color: #efe6cc; font: 14px system-ui, sans-serif; }
+  .bar { display: flex; gap: 8px; padding: 10px 16px; flex-wrap: wrap; align-items: center; }
+  select, button { font: inherit; padding: 4px 8px; }
+  model-viewer { width: 100%; height: calc(100vh - 56px); background: linear-gradient(#9bb5c9, #dfe6d8); }
+</style>
+</head>
+<body>
+<div class="bar">
+  <label>Tree <select id="tree"></select></label>
+  <label>LOD <select id="lod"><option>0</option><option>1</option><option>2</option><option>3</option></select></label>
+  <span id="info"></span>
+</div>
+<model-viewer id="mv" camera-controls shadow-intensity="1" exposure="1" camera-orbit="30deg 80deg auto"></model-viewer>
+<script>
+  const tree = document.getElementById('tree'), lod = document.getElementById('lod'), mv = document.getElementById('mv');
+  for (let i = 1; i <= 10; i++) { const n = String(i).padStart(2, '0'); tree.add(new Option('Jungle tree ' + n, n)); }
+  function show() { mv.src = `../assets/trees/Jungle_tree_${tree.value}_LOD${lod.value}.glb`; }
+  tree.onchange = lod.onchange = show;
+  mv.addEventListener('load', () => document.getElementById('info').textContent = 'loaded ' + mv.src.split('/').pop());
+  show();
+</script>
+</body>
+</html>

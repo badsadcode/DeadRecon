@@ -13,3 +13,16 @@ To add an entry, copy an `<article class="entry">` block in [`site/index.html`](
 ---
 
 *Where bad ideas receive suspiciously serious engineering.*
+
+## Project
+
+Godot **4.7.2 .NET**, C#, Forward+. Open `project.godot`, press Build, run.
+
+- `src/WorldGen/`: terrain generator (from Thornwake_Rewrite, see its `PROVENANCE.md`). Engine-free C#.
+- `content/world/jungle.world.json`: the world recipe (seed, landmass, region, climate).
+- `tools/WorldBaker/`: bakes the world **once** to `world/<name>/` (height + water tiles, preview maps).
+  The game loads the baked tiles; it never regenerates terrain.
+
+```
+dotnet run -c Release --project tools/WorldBaker -- content/world/jungle.world.json
+```

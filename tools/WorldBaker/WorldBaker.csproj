@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Bakes the persistent world once: runs the generator in src/WorldGen and writes height/water tiles to disk.
+       The game never regenerates terrain; it loads what this tool wrote (and what people edited afterwards). -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <RollForward>Major</RollForward>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <Optimize>true</Optimize>
+    <UseAppHost>false</UseAppHost>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/WorldGen/**/*.cs" Link="WorldGen/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+</Project>
