@@ -14,6 +14,8 @@ public partial class Walker : CharacterBody3D, IDamageable
     public bool Flying { get; private set; }
     /// <summary>Mouse-look multiplier (the weapon lowers it while zoomed).</summary>
     public float SensitivityScale { get; set; } = 1;
+    /// <summary>Set when a click captured the mouse; the weapon ignores the button until it's released.</summary>
+    public bool FireLockedUntilRelease { get; set; }
 
     public float Health { get; private set; } = MaxHealth;
     public bool Dead => Health <= 0;
@@ -85,8 +87,11 @@ public partial class Walker : CharacterBody3D, IDamageable
 
     public override void _UnhandledInput(InputEvent e)
     {
-        if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left })
+        if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } && Input.MouseMode != Input.MouseModeEnum.Captured)
+        {
             Input.MouseMode = Input.MouseModeEnum.Captured;
+            FireLockedUntilRelease = true; // the click that grabs the mouse must not also fire a shot
+        }
         else if (e is InputEventKey { Pressed: true, Echo: false } key)
         {
             if (key.PhysicalKeycode == Key.Escape) Input.MouseMode = Input.MouseModeEnum.Visible;

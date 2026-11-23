@@ -37,6 +37,14 @@ public partial class TreeScatter : Node3D
     private readonly List<ArrayMesh[]> _variants = new(); // [variant][lod]
     private static readonly List<(BaseMaterial3D Mat, float Rough, Color Albedo)> WetMaterials = new();
 
+    /// <summary>Places with no trees (mission camp, landing zone): centre (x, z) and radius. Set before planting.</summary>
+    public static readonly List<(Vector2 Centre, float Radius)> Clearings = new();
+    public static bool InClearing(float x, float z, float scale = 1)
+    {
+        foreach (var (c, r) in Clearings) if (new Vector2(x - c.X, z - c.Y).Length() < r * scale) return true;
+        return false;
+    }
+
     /// <summary>Weather: wet bark and leaves are darker and glossier.</summary>
     public void SetWetness(float wet)
     {
@@ -107,6 +115,7 @@ public partial class TreeScatter : Node3D
             if (!ok) break;
             _variants.Add(lods);
         }
+        WetMaterials.Clear();
         Foliage.TrunkHit += OnTrunkHit;
         if (_variants.Count == 0) GD.PushWarning("No trees found in res://assets/trees (Jungle_tree_NN_LODn.glb). The jungle will be bald.");
         _cellsPerSide = (int)MathF.Ceiling(World.Size / CellSize);
@@ -224,7 +233,7 @@ public partial class TreeScatter : Node3D
                 var (fx, fz) = World.ToSample(x, z);
                 int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
                 float y = World.Ground(gx, gz);
-                if (y > MaxHeight || World.NearWater(gx, gz, 2)) continue;
+                if (y > MaxHeight || World.NearWater(gx, gz, 2) || InClearing(x, z)) continue;
                 float dx = World.Ground(gx + 1, gz) - World.Ground(gx - 1, gz), dz = World.Ground(gx, gz + 1) - World.Ground(gx, gz - 1);
                 float ny = 1 / MathF.Sqrt(1 + (dx * dx + dz * dz) / (4 * World.Spacing * World.Spacing));
                 if (ny < MaxSlopeNormalY) continue;

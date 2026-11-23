@@ -25,6 +25,11 @@ public partial class Guard : CharacterBody3D, IDamageable
     public BakedWorld World = null!;
     public Vector3 Home;
     public string GunScene = "res://assets/weapons/BadGun_rifle_vietnam_97232.glb";
+    /// <summary>Patrol loop radius (m). A sentry uses a tiny one: he stands his post and looks around.</summary>
+    public float PatrolMin = 12, PatrolMax = 22;
+    public bool Sentry;
+    /// <summary>How many times he has gone from calm to alert (mission stats).</summary>
+    public int TimesAlerted { get; private set; }
 
     public Mood State { get; private set; } = Mood.Patrol;
     /// <summary>0..1: how sure he is that someone is there. 0.3 suspicious, 0.7 investigating, 1 alerted.</summary>
@@ -59,6 +64,8 @@ public partial class Guard : CharacterBody3D, IDamageable
     // ---- the grumpiness (the most important system in the game)
     private static readonly Dictionary<string, string[]> Lines = new()
     {
+        ["sentry"] = new[] { "Stand here, they said. Watch the radio, they said.", "This radio has more friends than me.",
+                             "I've counted every leaf on that tree. Twice.", "Nobody ever attacks on MY shift. Nobody ever visits either." },
         ["mutter"] = new[] { "Twelve hours. In the rain. Again.", "Who even needs a radio tower out here?", "My boots are full of jungle.",
                              "Guard the trees, they said. Great career move.", "If one more mosquito bites me...", "I had a nice desk job once." },
         ["suspicious"] = new[] { "Hm?", "...what was that?", "Hello? Monkey?", "I saw that. Probably." },
@@ -87,7 +94,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         for (int k = 0; k < 4; k++)
         {
             float a = k * MathF.Tau / 4 + _rng.RandfRange(-.4f, .4f);
-            float r = _rng.RandfRange(12, 22);
+            float r = Sentry ? _rng.RandfRange(.5f, 1.5f) : _rng.RandfRange(PatrolMin, PatrolMax);
             var p = Home + new Vector3(MathF.Cos(a) * r, 0, MathF.Sin(a) * r);
             p.Y = World.HeightAt(p.X, p.Z);
             _patrol.Add(p);
@@ -180,7 +187,7 @@ public partial class Guard : CharacterBody3D, IDamageable
             {
                 if (Suspicion >= .3f) { Enter(Mood.Suspicious, "suspicious"); return (here, 0, _lastKnown); }
                 _mutter -= dt;
-                if (_mutter <= 0) { _mutter = _rng.RandfRange(16, 30); Bark("mutter"); }
+                if (_mutter <= 0) { _mutter = _rng.RandfRange(16, 30); Bark(Sentry ? "sentry" : "mutter"); }
                 var p = _patrol[_patrolIndex];
                 if (Flat(here - p) < 1.2f || _stuck > 2.5f)
                 {
@@ -243,6 +250,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     private void EnterAlert()
     {
         bool fresh = State != Mood.Alert;
+        if (fresh) TimesAlerted++;
         Suspicion = 1;
         Enter(Mood.Alert, fresh ? "alert" : null);
         if (fresh) { _reaction = ReactionTime; _cooldown = 0; _burst = 0; _warningShots = 3; }

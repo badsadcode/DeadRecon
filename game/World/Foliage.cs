@@ -31,6 +31,9 @@ public static class Foliage
 
     public static int Count { get; private set; }
 
+    /// <summary>Forget everything (a new run of the scene re-registers what it plants).</summary>
+    public static void Clear() { Buckets.Clear(); OwnerBuckets.Clear(); Count = 0; }
+
     /// <summary>Register a batch of plants (one streaming cell); returns a handle for <see cref="Remove"/>.</summary>
     public static int Add(IEnumerable<Plant> plants)
     {

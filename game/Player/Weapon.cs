@@ -25,6 +25,7 @@ public partial class Weapon : Node3D
 
     public int Ammo { get; private set; } = MagazineSize;
     public bool Loaded { get; private set; }
+    public int ShotsFired { get; private set; }
     public bool Scoped => _scope?.Visible == true;
     public float AimAmount => _aim;
     public bool Reloading => _reload >= 0;
@@ -105,7 +106,9 @@ public partial class Weapon : Node3D
         if (scoped) { var vs = GetViewport().GetVisibleRect().Size; _scopeMaterial.SetShaderParameter("aspect", vs.X / vs.Y); }
 
         _cooldown -= dt;
-        if (captured && Input.IsMouseButtonPressed(MouseButton.Left) && _cooldown <= 0 && !Reloading) Fire();
+        bool trigger = Input.IsMouseButtonPressed(MouseButton.Left);
+        if (!trigger) Walker.FireLockedUntilRelease = false;
+        if (captured && trigger && !Walker.FireLockedUntilRelease && _cooldown <= 0 && !Reloading) Fire();
         if (captured && Input.IsPhysicalKeyPressed(Key.R) && !Reloading && Ammo < MagazineSize) { _reload = 0; _clack.Play(); }
         UpdateReload(dt);
 
@@ -136,6 +139,7 @@ public partial class Weapon : Node3D
         if (Walker.Dead) return;
         if (Ammo <= 0) { _click.Play(); _cooldown = .25f; return; }
         Ammo--;
+        ShotsFired++;
         _cooldown = 60f / RoundsPerMinute;
         _kick = Math.Min(_kick + 1, 1.6f);
         _flash = 0;

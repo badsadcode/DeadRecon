@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using DeadRecon.AI;
 using DeadRecon.Combat;
+using DeadRecon.Missions;
 using DeadRecon.Player;
 using DeadRecon.World;
 using Godot;
@@ -25,6 +26,8 @@ public partial class Main : Node3D
 	private Walker _walker = null!;
 	private Label _hud = null!;
 	private Guard _guard = null!;
+	private readonly System.Collections.Generic.List<Guard> _guards = new();
+	private Mission _mission = null!;
 	private Weather _weather = null!;
 	private ColorRect _hurt = null!;
 	private Label _deathText = null!;
@@ -50,6 +53,7 @@ public partial class Main : Node3D
 			return;
 		}
 		_world = BakedWorld.Load(dir);
+		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
 
 		var worldEnv = MakeEnvironment();
 		AddChild(worldEnv);
@@ -78,12 +82,18 @@ public partial class Main : Node3D
 		_deathText = new Label
 		{
 			HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center, Visible = false,
-			Text = "You were shot by a grumpy man.\nPress Enter to try again.",
+			Text = "",
 		};
 		_deathText.AddThemeFontSizeOverride("font_size", 34);
 		_deathText.AddThemeColorOverride("font_shadow_color", Colors.Black);
 		_deathText.SetAnchorsPreset(Control.LayoutPreset.FullRect);
 		layer.AddChild(_deathText);
+
+		// The operation: picked before planting so the camp and landing zone are clearings.
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest"));
+		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
+		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
+		_mission.Plan(seed, spawn.position);
 
 		_terrain = new TerrainStreamer { World = _world, Viewer = _walker };
 		_trees = new TreeScatter { World = _world, Viewer = _walker };
@@ -92,13 +102,21 @@ public partial class Main : Node3D
 		AddChild(_trees);
 		AddChild(_cover);
 
-		// One grumpy guard, ~90 m into the forest behind the spawn point (you spawn facing the river), out of sight range.
-		float backYaw = Mathf.DegToRad(spawn.yaw + 180);
-		var home = spawn.position + new Vector3(-MathF.Sin(backYaw), 0, -MathF.Cos(backYaw)) * 90;
-		home.Y = _world.HeightAt(home.X, home.Z) + .2f;
-		_guard = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home };
-		AddChild(_guard);
-		_guard.GlobalPosition = home;
+		// The camp's guards: a grumpy patroller and a grumpier sentry by the radio desk.
+		Guard AddGuard(Vector3 home, bool sentry)
+		{
+			home.Y = _world.HeightAt(home.X, home.Z) + .2f;
+			var g = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry, PatrolMin = 16, PatrolMax = 26 };
+			AddChild(g);
+			g.GlobalPosition = home;
+			_guards.Add(g);
+			_mission.Guards.Add(g);
+			return g;
+		}
+		_guard = AddGuard(_mission.Camp + new Vector3(0, 0, -2), sentry: false);
+		AddGuard(_mission.IntelAt + new Vector3(.8f, 0, 1.6f), sentry: true);
+		_mission.Trees = _trees;
+		AddChild(_mission);
 
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
@@ -111,6 +129,8 @@ public partial class Main : Node3D
 		if (treeTest != "") _ = RunTreeTest(treeTest);
 		string rainTest = Arg("raintest", "");
 		if (rainTest != "") _ = RunRainTest(rainTest);
+		string missionTest = Arg("missiontest", "");
+		if (missionTest != "") _ = RunMissionTest(missionTest);
 	}
 
 	public override void _Process(double delta)
@@ -127,14 +147,15 @@ public partial class Main : Node3D
 			$"pos {p.X:0} {p.Y:0} {p.Z:0}   ground {_world.HeightAt(p.X, p.Z):0} m   {(_walker.Flying ? "FLYING" : "walking")}\n" +
 			$"trees {_trees.TreesShown:N0} ({_trees.VariantCount} kinds)   undergrowth {_cover.PlantsShown:N0}   ground: {(_terrain.TextureMix > .5f ? "textured" : "painted")}\n" +
 			(_weapon.Loaded ? $"rifle {_weapon.Ammo}/20{(_weapon.Reloading ? "  reloading..." : "")}\n" : "") +
-			$"health {_walker.Health:0}   guard: {GuardStatus()}\n" +
+			$"{_mission.Objective()}\n" +
+			$"health {_walker.Health:0}   nearest guard: {GuardStatus()}\n" +
 			$"{CoverStatus()}\n" +
 			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
 			"click: grab mouse   WASD/Shift/Space  Ctrl crouch   LMB fire  RMB aim  R reload   F: fly (Space/C up/down)   N: weather   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
-		_deathText.Visible = _walker.Dead;
+		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
 	}
 
@@ -144,11 +165,10 @@ public partial class Main : Node3D
 			_weather.Cycle();
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.T } && _terrain != null)
 			_terrain.TextureMix = _terrain.TextureMix > .5f ? 0 : 1;
-		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _walker is { Dead: true })
-		{
-			_walker.Respawn(_spawn.position, _spawn.yaw);
-			_guard.Forget();
-		}
+		// Dead or done: Enter starts a new operation (same jungle, new camp; felled trees stay felled).
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _mission != null
+		    && (_walker.Dead || _mission.State == Mission.Phase.Complete))
+			GetTree().ReloadCurrentScene();
 	}
 
 	/// <summary>
@@ -259,6 +279,107 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>
+	/// Automated mission run: overview of the camp, approach, take out both guards, take the intel, extract.
+	/// Screenshots of each step and the debrief; logs the mission state. Then quit.
+	/// </summary>
+	private async Task RunMissionTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}: {_mission.State}, health {_walker.Health:0}, {_mission.Objective()}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		async Task Settle() { for (int f = 0; f < 1800 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1); await Frames(20); }
+		void Put(Vector3 p, bool fly = false) { _walker.SetFlying(fly); _walker.GlobalPosition = new Vector3(p.X, _world.HeightAt(p.X, p.Z) + (fly ? p.Y : .2f), p.Z); }
+
+		_weather.AutoChange = false;
+		for (int f = 0; f < 1800 && _waitingForGround; f++) await Frames(1);
+		await Settle();
+		await Shot("0_start");
+
+		// 1. The camp from the air (guards ignore a flying player).
+		var camp = _mission.Camp;
+		var toCamp = (camp - _spawn.position); toCamp.Y = 0; toCamp = toCamp.Normalized();
+		Put(camp - toCamp * 28 + Vector3.Up * 14, fly: true);
+		_walker.GlobalPosition = new Vector3(_walker.GlobalPosition.X, _world.HeightAt(camp.X, camp.Z) + 16, _walker.GlobalPosition.Z);
+		LookAt(camp);
+		await Settle();
+		await Shot("1_camp_overview");
+
+		// 2. Approach on foot to ~30 m, to a spot where no trunk is between us and the radio desk, and look through the scope.
+		Vector3 spot = camp - toCamp * 30;
+		for (int k = 0; k < 48; k++)
+		{
+			float ang = k * .37f, r = 24 + (k % 4) * 3;
+			var c = camp - toCamp.Rotated(Vector3.Up, MathF.Sin(ang) * 1.2f) * r;
+			c.Y = _world.HeightAt(c.X, c.Z) + 1.6f;
+			if (Foliage.RaycastTrunk(c, _mission.IntelAt + Vector3.Up * 1.2f) == null) { spot = c; break; }
+		}
+		Put(spot);
+		LookAt(_mission.IntelAt + Vector3.Up * .5f);
+		await Settle();
+		_weapon.ForceAim(true);
+		await Frames(3);
+		await Shot("2_recon_scope");
+
+		// 3. Take out both guards (aimed headshots, a few tries each).
+		foreach (var g in _guards)
+		{
+			for (int k = 0; k < 10 && g.State != Guard.Mood.Dead && !_walker.Dead; k++)
+			{
+				// Step to a spot with a clear line to this guard if a trunk is in the way.
+				var head = g.GlobalPosition + Vector3.Up * 1.62f;
+				if (Foliage.RaycastTrunk(_walker.Camera.GlobalPosition, head) != null)
+					for (int m = 0; m < 24; m++)
+					{
+						var c = g.GlobalPosition + new Vector3(MathF.Cos(m * .9f), 0, MathF.Sin(m * .9f)) * (18 + m % 3 * 4);
+						c.Y = _world.HeightAt(c.X, c.Z) + 1.6f;
+						if (Foliage.RaycastTrunk(c, head) == null) { Put(c); await Frames(3); break; }
+					}
+				LookAt(head);
+				await Frames(2);
+				if (_weapon.Ammo == 0) _weapon.TestReload();
+				_weapon.TestFire();
+				await Seconds(.25);
+			}
+			GD.Print($"[test] guard {(g.Sentry ? "sentry" : "patrol")}: {g.State}");
+		}
+		_weapon.ForceAim(false);
+		await Seconds(1);
+
+		// 4. Walk up to the desk and take the intel (hold E is simulated).
+		Put(_mission.IntelAt + new Vector3(-1.4f, 0, -.9f));
+		LookAt(_mission.IntelAt);
+		await Frames(10);
+		await Shot("3_at_the_desk");
+		_mission.TestTakeIntel();
+		await Frames(5);
+
+		// 5. Look toward the extraction smoke from the camp, then go there.
+		LookAt(_mission.Extraction + Vector3.Up * 4);
+		await Frames(5);
+		await Shot("4_extraction_marker");
+		Put(_mission.Extraction + new Vector3(12, 0, 0));
+		LookAt(_mission.Extraction + Vector3.Up * 2);
+		await Settle();
+		await Shot("5_landing_zone");
+		Put(_mission.Extraction + new Vector3(2, 0, 0));
+		await Frames(10);
+		await Shot("6_debrief");
+		GD.Print($"[test] done: {_mission.State}, {_mission.OperationName}");
 		GetTree().Quit();
 	}
 
@@ -460,6 +581,7 @@ public partial class Main : Node3D
 	/// <summary>How hidden the player is from the guard by plants (whether or not he's looking), and what he sees now.</summary>
 	private string CoverStatus()
 	{
+		var _guard = NearestGuard();
 		if (_guard.State == Guard.Mood.Dead) return "cover: nobody left to hide from";
 		var eye = _guard.GlobalPosition + Vector3.Up * 1.6f;
 		if (eye.DistanceTo(_walker.GlobalPosition) > 90) return "cover: out of his sight range";
@@ -468,8 +590,20 @@ public partial class Main : Node3D
 		return $"cover from plants: {(1 - through) * 100:0}%   {sees}";
 	}
 
+	private Guard NearestGuard()
+	{
+		Guard best = _guard; float bd = float.MaxValue;
+		foreach (var g in _guards)
+		{
+			float d = g.GlobalPosition.DistanceTo(_walker.GlobalPosition) + (g.State == Guard.Mood.Dead ? 1e6f : 0);
+			if (d < bd) { bd = d; best = g; }
+		}
+		return best;
+	}
+
 	private string GuardStatus()
 	{
+		var _guard = NearestGuard();
 		float d = _guard.GlobalPosition.DistanceTo(_walker.GlobalPosition);
 		string mood = _guard.State switch
 		{

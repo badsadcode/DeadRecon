@@ -26,3 +26,14 @@ Godot **4.7.2 .NET**, C#, Forward+. Open `project.godot`, press Build, run.
 ```
 dotnet run -c Release --project tools/WorldBaker -- content/world/jungle.world.json
 ```
+
+## Playing the test mission
+
+Each run is a new operation on the same baked jungle: a camp with a patrolling guard and a sentry, intel on a
+radio desk, and a landing zone marked with green smoke. `--seed=N` (after `--`) replays a specific operation.
+
+WASD move · Shift run · Ctrl crouch · Space jump · LMB fire · RMB aim (scope) · R reload · **E** (hold) take intel ·
+N weather · T textured/painted ground · F fly · Enter new operation (after death or success).
+
+Scripted checks (each saves screenshots to the given folder and quits):
+`--missiontest=<dir>`, `--aitest=<dir>`, `--treetest=<dir>`, `--raintest=<dir>`, `--shots=<dir>`.
