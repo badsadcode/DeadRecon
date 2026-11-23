@@ -6,8 +6,10 @@ namespace DeadRecon.World;
 
 /// <summary>
 /// Plants the jungle trees from assets/trees on the baked ground, deterministically (same world = same trees).
-/// The land is cut into square cells; each cell uses a few tree variants, one MultiMesh per variant, and the whole cell
-/// switches level of detail together by swapping the MultiMesh's mesh (instances keep their transforms).
+/// Two layers from the same tree models: the <b>canopy</b> (full-size trees, a few giants) and the <b>understory</b>
+/// (saplings at a quarter to half size, darker, drawn one detail level lower). Every tree gets a slight colour shift.
+/// The land is cut into square cells; each cell uses a few variants, one MultiMesh per (variant, layer), and the whole
+/// cell switches level of detail together.
 /// </summary>
 public partial class TreeScatter : Node3D
 {
@@ -15,13 +17,21 @@ public partial class TreeScatter : Node3D
     public Node3D Viewer = null!;
 
     private const float CellSize = 256;          // metres per streaming cell
-    private const float TreeSpacing = 11;        // one candidate tree per spacing x spacing square
-    private const float Fill = .85f;             // share of candidates that become trees
     private const int VariantsPerCell = 3;
-    private const float MaxSlopeNormalY = .78f;  // no trees on ground steeper than ~39 degrees
+    private const float MaxSlopeNormalY = .74f;  // no trees on ground steeper than ~42 degrees
     private const float MaxHeight = 1450;
     /// <summary>Distance (m, viewer to cell square) up to which each tree LOD is used; beyond the last, no trees.</summary>
-    private static readonly float[] LodUntil = { 45, 180, 450, 2800 };
+    private static readonly float[] LodUntil = { 35, 140, 380, 2800 };
+
+    private sealed record Layer(string Name, float Spacing, float Fill, float MinScale, float MaxScale, float GiantChance,
+                                int LodBias, float Shade, int HideFromLod, uint Salt);
+
+    private static readonly Layer[] Layers =
+    {
+        new("canopy", Spacing: 8.5f, Fill: .9f, MinScale: .75f, MaxScale: 1.45f, GiantChance: .06f, LodBias: 0, Shade: 1f, HideFromLod: -1, Salt: 0),
+        // Saplings are small: in billboard range (past ~380 m) they are pixels under the canopy, so they aren't drawn.
+        new("understory", Spacing: 6f, Fill: .55f, MinScale: .22f, MaxScale: .45f, GiantChance: 0, LodBias: 1, Shade: .72f, HideFromLod: 3, Salt: 1000),
+    };
 
     private readonly List<ArrayMesh[]> _variants = new(); // [variant][lod]
     private readonly Dictionary<(int, int), Cell> _cells = new();
@@ -33,10 +43,19 @@ public partial class TreeScatter : Node3D
     /// <summary>Cells in range not planted yet (0 = the view is complete).</summary>
     public int Pending { get; private set; } = 1;
 
+    private sealed class Part
+    {
+        public int Variant;
+        public Layer Layer = null!;
+        public MultiMeshInstance3D Node = null!;
+        public Transform3D[] Trees = Array.Empty<Transform3D>();
+        public Color[] Tints = Array.Empty<Color>();
+    }
+
     private sealed class Cell
     {
         public int Lod = -1;
-        public readonly List<(int Variant, MultiMeshInstance3D Node, Transform3D[] Trees)> Parts = new();
+        public readonly List<Part> Parts = new();
         public int Trees;
     }
 
@@ -88,7 +107,7 @@ public partial class TreeScatter : Node3D
         {
             if (!_cells.TryGetValue((i, j), out var cell))
             {
-                if (built >= 8) { pending++; continue; } // spread first-time planting over several updates
+                if (built >= 6) { pending++; continue; } // spread first-time planting over several updates
                 cell = Plant(i, j);
                 _cells[(i, j)] = cell;
                 built++;
@@ -97,6 +116,7 @@ public partial class TreeScatter : Node3D
             shown += cell.Trees;
         }
         Pending = pending;
+
         var drop = new List<(int, int)>();
         foreach (var (key, cell) in _cells)
             if (!keep.Contains(key)) { foreach (var part in cell.Parts) part.Node.QueueFree(); drop.Add(key); }
@@ -125,60 +145,79 @@ public partial class TreeScatter : Node3D
     private void SetLod(Cell cell, int lod)
     {
         cell.Lod = lod;
-        foreach (var (variant, node, trees) in cell.Parts)
+        foreach (var part in cell.Parts)
         {
-            node.Multimesh = MakeMultiMesh(_variants[variant][lod], trees);
-            node.CastShadow = lod <= 1 ? GeometryInstance3D.ShadowCastingSetting.On : GeometryInstance3D.ShadowCastingSetting.Off;
+            bool hidden = part.Layer.HideFromLod >= 0 && lod >= part.Layer.HideFromLod;
+            part.Node.Visible = !hidden;
+            if (hidden) { part.Node.Multimesh = null; continue; }
+            int l = Math.Min(lod + part.Layer.LodBias, LodUntil.Length - 1);
+            part.Node.Multimesh = MakeMultiMesh(_variants[part.Variant][l], part.Trees, part.Tints);
+            part.Node.CastShadow = l <= 1 ? GeometryInstance3D.ShadowCastingSetting.On : GeometryInstance3D.ShadowCastingSetting.Off;
         }
     }
 
-    private static MultiMesh MakeMultiMesh(Mesh mesh, Transform3D[] trees)
+    private static MultiMesh MakeMultiMesh(Mesh mesh, Transform3D[] trees, Color[] tints)
     {
-        var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, Mesh = mesh, InstanceCount = trees.Length };
-        for (int t = 0; t < trees.Length; t++) mm.SetInstanceTransform(t, trees[t]);
+        var mm = new MultiMesh { TransformFormat = MultiMesh.TransformFormatEnum.Transform3D, UseColors = true, Mesh = mesh, InstanceCount = trees.Length };
+        for (int t = 0; t < trees.Length; t++) { mm.SetInstanceTransform(t, trees[t]); mm.SetInstanceColor(t, tints[t]); }
         return mm;
     }
 
     private Cell Plant(int i, int j)
     {
         var cell = new Cell();
-        var perVariant = new List<Transform3D>[VariantsPerCell];
-        for (int k = 0; k < VariantsPerCell; k++) perVariant[k] = new List<Transform3D>();
         var picks = new int[VariantsPerCell];
         for (int k = 0; k < VariantsPerCell; k++) picks[k] = (int)(Hash((uint)i, (uint)j, 11u + (uint)k) % (uint)_variants.Count);
-
-        int per = (int)(CellSize / TreeSpacing);
         float x0 = i * CellSize - World.Half, z0 = j * CellSize - World.Half;
-        for (int b = 0; b < per; b++)
-        for (int a = 0; a < per; a++)
+
+        foreach (var layer in Layers)
         {
-            uint ax = (uint)(i * per + a), az = (uint)(j * per + b);
-            uint h = Hash(ax, az, 1);
-            if ((h & 1023) / 1023f > Fill) continue;
-            float x = x0 + (a + Unit(Hash(ax, az, 2))) * TreeSpacing;
-            float z = z0 + (b + Unit(Hash(ax, az, 3))) * TreeSpacing;
-            if (x < -World.Half || z < -World.Half || x > World.Half || z > World.Half) continue;
-            var (fx, fz) = World.ToSample(x, z);
-            int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
-            float y = World.Ground(gx, gz);
-            if (y > MaxHeight || World.NearWater(gx, gz, 2)) continue;
-            float dx = World.Ground(gx + 1, gz) - World.Ground(gx - 1, gz), dz = World.Ground(gx, gz + 1) - World.Ground(gx, gz - 1);
-            float ny = 1 / MathF.Sqrt(1 + (dx * dx + dz * dz) / (4 * World.Spacing * World.Spacing));
-            if (ny < MaxSlopeNormalY) continue;
-            float scale = .8f + .55f * Unit(Hash(ax, az, 4));
-            float yaw = Unit(Hash(ax, az, 5)) * MathF.Tau;
-            var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(scale, scale, scale));
-            perVariant[(int)(Hash(ax, az, 6) % VariantsPerCell)].Add(new Transform3D(basis, new Vector3(x, World.HeightAt(x, z) - .3f, z)));
-        }
-        for (int k = 0; k < VariantsPerCell; k++)
-        {
-            if (perVariant[k].Count == 0) continue;
-            var node = new MultiMeshInstance3D();
-            AddChild(node);
-            cell.Parts.Add((picks[k], node, perVariant[k].ToArray()));
-            cell.Trees += perVariant[k].Count;
+            var trees = new List<Transform3D>[VariantsPerCell];
+            var tints = new List<Color>[VariantsPerCell];
+            for (int k = 0; k < VariantsPerCell; k++) { trees[k] = new(); tints[k] = new(); }
+            int per = (int)(CellSize / layer.Spacing);
+            for (int b = 0; b < per; b++)
+            for (int a = 0; a < per; a++)
+            {
+                uint ax = (uint)(i * per + a), az = (uint)(j * per + b), s = layer.Salt;
+                if (Unit(Hash(ax, az, s + 1)) > layer.Fill) continue;
+                float x = x0 + (a + Unit(Hash(ax, az, s + 2))) * layer.Spacing;
+                float z = z0 + (b + Unit(Hash(ax, az, s + 3))) * layer.Spacing;
+                if (x < -World.Half || z < -World.Half || x > World.Half || z > World.Half) continue;
+                var (fx, fz) = World.ToSample(x, z);
+                int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
+                float y = World.Ground(gx, gz);
+                if (y > MaxHeight || World.NearWater(gx, gz, 2)) continue;
+                float dx = World.Ground(gx + 1, gz) - World.Ground(gx - 1, gz), dz = World.Ground(gx, gz + 1) - World.Ground(gx, gz - 1);
+                float ny = 1 / MathF.Sqrt(1 + (dx * dx + dz * dz) / (4 * World.Spacing * World.Spacing));
+                if (ny < MaxSlopeNormalY) continue;
+
+                float scale = layer.MinScale + (layer.MaxScale - layer.MinScale) * Unit(Hash(ax, az, s + 4));
+                if (Unit(Hash(ax, az, s + 7)) < layer.GiantChance) scale = 1.7f + .5f * Unit(Hash(ax, az, s + 8)); // emergent giants
+                float yaw = Unit(Hash(ax, az, s + 5)) * MathF.Tau;
+                var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(scale, scale * (.9f + .25f * Unit(Hash(ax, az, s + 9))), scale));
+                int k2 = (int)(Hash(ax, az, s + 6) % VariantsPerCell);
+                trees[k2].Add(new Transform3D(basis, new Vector3(x, World.HeightAt(x, z) - .3f * scale, z)));
+                tints[k2].Add(Tint(Hash(ax, az, s + 10), layer.Shade));
+            }
+            for (int k = 0; k < VariantsPerCell; k++)
+            {
+                if (trees[k].Count == 0) continue;
+                var node = new MultiMeshInstance3D();
+                AddChild(node);
+                cell.Parts.Add(new Part { Variant = picks[k], Layer = layer, Node = node, Trees = trees[k].ToArray(), Tints = tints[k].ToArray() });
+                cell.Trees += trees[k].Count;
+            }
         }
         return cell;
+    }
+
+    /// <summary>A small random shift in brightness and hue (yellower or bluer greens), darkened by the layer's shade.</summary>
+    private static Color Tint(uint h, float shade)
+    {
+        float bright = (.82f + .3f * Unit(h)) * shade;
+        float warm = Unit(h >> 8) - .5f; // -0.5 .. 0.5
+        return new Color(bright * (1 + .18f * warm), bright, bright * (1 - .22f * warm));
     }
 
     /// <summary>Merge every MeshInstance3D of an imported tree scene into one mesh (one surface per material).</summary>
@@ -208,11 +247,13 @@ public partial class TreeScatter : Node3D
                     }
                     result.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
                     var material = mi.GetActiveMaterial(s);
-                    if (material is BaseMaterial3D bm && bm.Transparency != BaseMaterial3D.TransparencyEnum.Disabled)
+                    if (material is BaseMaterial3D bm)
                     {
-                        // Leaf cards and billboards: visible from both sides.
                         bm = (BaseMaterial3D)bm.Duplicate();
-                        bm.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
+                        // Per-tree tint arrives as the instance colour, which only reaches albedo via vertex colour.
+                        bm.VertexColorUseAsAlbedo = true;
+                        // Leaf cards and billboards: visible from both sides.
+                        if (bm.Transparency != BaseMaterial3D.TransparencyEnum.Disabled) bm.CullMode = BaseMaterial3D.CullModeEnum.Disabled;
                         material = bm;
                     }
                     result.SurfaceSetMaterial(result.GetSurfaceCount() - 1, material);

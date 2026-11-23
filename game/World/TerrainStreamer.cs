@@ -35,21 +35,45 @@ public partial class TerrainStreamer : Node3D
     private readonly ConcurrentQueue<Built> _done = new();
     private int _building;
     private double _sinceUpdate = 1;
-    private StandardMaterial3D _groundMaterial = null!, _waterMaterial = null!;
+    private Material _groundMaterial = null!;
+    private StandardMaterial3D _waterMaterial = null!;
 
     public int TilesAtFullDetail { get; private set; }
+    public bool HasTextures { get; private set; }
+
+    /// <summary>0 = painted placeholder ground, 1 = Tom's photo textures (toggle in game to compare).</summary>
+    public float TextureMix
+    {
+        get => _textureMix;
+        set { _textureMix = HasTextures ? value : 0; ((ShaderMaterial)_groundMaterial).SetShaderParameter("texture_mix", _textureMix); }
+    }
+    private float _textureMix;
     public bool Settled => _building == 0 && _done.IsEmpty && _tiles.TrueForAll(t => t.Step == Desired(t));
 
     public override void _Ready()
     {
-        _groundMaterial = new StandardMaterial3D
+        var ground = new ShaderMaterial { Shader = GD.Load<Shader>("res://game/World/terrain.gdshader") };
+        // Tom's ground textures (assets/textures). Missing ones leave the painted look in place.
+        var textures = new (string Param, string File)[]
         {
-            VertexColorUseAsAlbedo = true, Roughness = .95f, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            ("loam_tex", "forest_loam_roots"), ("litter_tex", "wet_leaf_litter"), ("moss_tex", "creeping_groundcover"),
+            ("rock_tex", "mossy_limestone"), ("mud_tex", "laterite_mud"), ("pebble_tex", "river_pebbles"),
         };
+        bool all = true;
+        foreach (var (param, file) in textures)
+        {
+            string path = $"res://assets/textures/{file}.png";
+            if (ResourceLoader.Exists(path)) ground.SetShaderParameter(param, GD.Load<Texture2D>(path));
+            else all = false;
+        }
+        HasTextures = all;
+        if (!all) GD.PushWarning("Some ground textures are missing from res://assets/textures; using the painted ground.");
+        _groundMaterial = ground;
+        TextureMix = all ? 1 : 0;
         _waterMaterial = new StandardMaterial3D
         {
-            AlbedoColor = new Color(.10f, .17f, .13f, .82f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            Roughness = .06f, Metallic = .15f, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            AlbedoColor = new Color(.20f, .19f, .11f, .9f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            Roughness = .45f, Metallic = .0f, MetallicSpecular = .15f, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
         for (int tz = 0; tz < World.TilesPerSide; tz++)
         for (int tx = 0; tx < World.TilesPerSide; tx++)
@@ -152,7 +176,7 @@ public partial class TerrainStreamer : Node3D
         {
             int gx = gx0 + i * step, gz = gz0 + j * step;
             var normal = Normal(gx, gz, step);
-            m.Add(new Vector3(World.SampleToWorld(gx), World.Ground(gx, gz), World.SampleToWorld(gz)), normal, GroundColor(gx, gz, normal));
+            m.Add(new Vector3(World.SampleToWorld(gx), World.Ground(gx, gz), World.SampleToWorld(gz)), normal, GroundColor(gx, gz, normal), Weights(gx, gz, normal));
         }
         for (int j = 0; j < n - 1; j++)
         for (int i = 0; i < n - 1; i++)
@@ -168,7 +192,7 @@ public partial class TerrainStreamer : Node3D
         for (int j = n - 1; j > 0; j--) ring.Add(j * n);                     // west, south -> north
         float drop = 2 + step * World.Spacing * 2;
         int first = m.Count;
-        foreach (int v in ring) m.Add(m.Pos[v] - new Vector3(0, drop, 0), m.Nrm[v], m.Col[v]);
+        foreach (int v in ring) m.Add(m.Pos[v] - new Vector3(0, drop, 0), m.Nrm[v], m.Col[v], m.Uv[v]);
         for (int k = 0; k < ring.Count; k++)
         {
             int k2 = (k + 1) % ring.Count;
@@ -227,12 +251,11 @@ public partial class TerrainStreamer : Node3D
     private Color GroundColor(int gx, int gz, Vector3 normal)
     {
         float h = World.Ground(gx, gz);
-        uint hash = Hash((uint)gx, (uint)gz);
-        float noise = (hash & 1023) / 1023f;
+        float noise = ValueNoise(gx / 3f, gz / 3f);
         float blotch = ValueNoise(gx / 40f, gz / 40f) * .65f + ValueNoise(gx / 9f + 77, gz / 9f) * .35f;
-        var floor = new Color(.16f, .22f, .10f).Lerp(new Color(.24f, .30f, .13f), blotch * .7f + noise * .3f);
-        var rock = new Color(.36f, .34f, .30f).Lerp(new Color(.30f, .29f, .26f), noise);
-        var mud = new Color(.27f, .22f, .15f);
+        var floor = new Color(.09f, .13f, .05f).Lerp(new Color(.16f, .17f, .08f), blotch);
+        var rock = new Color(.30f, .29f, .25f).Lerp(new Color(.22f, .23f, .19f), noise);
+        var mud = new Color(.21f, .16f, .10f);
         float steep = Mathf.SmoothStep(.82f, .62f, normal.Y);
         var c = floor.Lerp(rock, steep);
         if (World.NearWater(gx, gz, 3)) c = c.Lerp(mud, .75f);
@@ -248,6 +271,14 @@ public partial class TerrainStreamer : Node3D
         u = u * u * (3 - 2 * u); v = v * v * (3 - 2 * v);
         float L(int a, int b) => (Hash((uint)a, (uint)b) & 1023) / 1023f;
         return Mathf.Lerp(Mathf.Lerp(L(ix, iz), L(ix + 1, iz), u), Mathf.Lerp(L(ix, iz + 1), L(ix + 1, iz + 1), u), v);
+    }
+
+    /// <summary>Texture blend weights for the ground shader, in UV: x = rock (steep), y = wet (near water).</summary>
+    private Vector2 Weights(int gx, int gz, Vector3 normal)
+    {
+        float rock = Mathf.SmoothStep(.84f, .64f, normal.Y);
+        float wet = World.NearWater(gx, gz, 1) ? 1f : World.NearWater(gx, gz, 3) ? .65f : World.NearWater(gx, gz, 6) ? .3f : 0f;
+        return new Vector2(rock, wet);
     }
 
     private static uint Hash(uint x, uint z)
@@ -283,15 +314,16 @@ public sealed class MeshData
 {
     public readonly Vector3[] Pos, Nrm;
     public readonly Color[] Col;
+    public readonly Vector2[] Uv;
     public readonly int[] Idx;
     public int Count, IndexCount;
 
     public MeshData(int vertices, int indices)
     {
-        Pos = new Vector3[vertices]; Nrm = new Vector3[vertices]; Col = new Color[vertices]; Idx = new int[indices];
+        Pos = new Vector3[vertices]; Nrm = new Vector3[vertices]; Col = new Color[vertices]; Uv = new Vector2[vertices]; Idx = new int[indices];
     }
 
-    public void Add(Vector3 p, Vector3 n, Color c) { Pos[Count] = p; Nrm[Count] = n; Col[Count] = c; Count++; }
+    public void Add(Vector3 p, Vector3 n, Color c, Vector2 uv = default) { Pos[Count] = p; Nrm[Count] = n; Col[Count] = c; Uv[Count] = uv; Count++; }
     public void Tri(int a, int b, int c) { Idx[IndexCount++] = a; Idx[IndexCount++] = b; Idx[IndexCount++] = c; }
 
     public ArrayMesh ToMesh()
@@ -301,6 +333,7 @@ public sealed class MeshData
         arrays[(int)Mesh.ArrayType.Vertex] = Count == Pos.Length ? Pos : Pos[..Count];
         arrays[(int)Mesh.ArrayType.Normal] = Count == Nrm.Length ? Nrm : Nrm[..Count];
         arrays[(int)Mesh.ArrayType.Color] = Count == Col.Length ? Col : Col[..Count];
+        arrays[(int)Mesh.ArrayType.TexUV] = Count == Uv.Length ? Uv : Uv[..Count];
         arrays[(int)Mesh.ArrayType.Index] = IndexCount == Idx.Length ? Idx : Idx[..IndexCount];
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
