@@ -363,3 +363,30 @@ main { padding: 0 16px; }
   .alert-chip { animation: none; }
   .bar i { transition: none; }
 }
+
+/* ---------- Screenshots in entries ---------- */
+.shot { margin: 22px 0; }
+.shot img {
+  display: block; width: 100%; height: auto;
+  border-radius: 4px;
+  border: 6px solid #fff;
+  box-shadow: 0 6px 16px rgba(0,0,0,.35);
+  background: #ddd;
+}
+.shot:nth-of-type(odd) img { transform: rotate(-.6deg); }
+.shot:nth-of-type(even) img { transform: rotate(.5deg); }
+.shot.small img { max-width: 460px; margin: 0 auto; }
+.shot.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.shot.pair figcaption { grid-column: 1 / -1; }
+.shot figcaption {
+  font-family: "Caveat", cursive;
+  font-size: 1.25rem;
+  line-height: 1.25;
+  color: var(--ink-soft);
+  text-align: center;
+  margin-top: 10px;
+}
+@media (max-width: 560px) {
+  .shot.pair { grid-template-columns: 1fr; }
+  .shot img { transform: none !important; }
+}
