@@ -33,7 +33,8 @@ Each run is a new operation on the same baked jungle: a camp with a patrolling g
 radio desk, and a landing zone marked with green smoke. `--seed=N` (after `--`) replays a specific operation.
 
 WASD move · Shift run · Ctrl crouch · Space jump · LMB fire · RMB aim (scope) · R reload · **E** (hold) take intel ·
-N weather · T textured/painted ground · F fly · Enter new operation (after death or success).
+N weather · T textured/painted ground · F fly · Esc pause menu (difficulty, mouse, debug) · F3 debug text ·
+Enter new operation (after death or success).
 
 Scripted checks (each saves screenshots to the given folder and quits):
-`--missiontest=<dir>`, `--squadtest=<dir>`, `--aitest=<dir>`, `--treetest=<dir>`, `--raintest=<dir>`, `--shots=<dir>`.
+`--missiontest=<dir>`, `--squadtest=<dir>`, `--hudtest=<dir>`, `--aitest=<dir>`, `--treetest=<dir>`, `--raintest=<dir>`, `--shots=<dir>`.

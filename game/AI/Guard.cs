@@ -55,7 +55,8 @@ public partial class Guard : CharacterBody3D, IDamageable
     // ---- tuning
     private const float WalkSpeed = 1.5f, InvestigateSpeed = 2.0f, RunSpeed = 4.3f, Gravity = 9.81f, EyeHeight = 1.6f;
     private const float ViewRange = 55, AlertViewRange = 85, ViewCos = .5f, AlertViewCos = -.2f; // 120 deg cone, wider when alert
-    private const float SearchTime = 18, ReactionTime = .7f;
+    private const float SearchTime = 18;
+    private static float ReactionTime => .7f * DeadRecon.UI.Settings.GuardReaction;
     private const float MinExposure = .12f; // below this the player is hidden by plants
 
     private Node3D _rig = null!, _head = null!, _legL = null!, _legR = null!, _gunPivot = null!;
@@ -156,7 +157,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         var to = Target.Chest - eye;
         float dist = to.Length();
         bool alert = State is Mood.Alert or Mood.Search;
-        float range = (alert ? AlertViewRange : ViewRange) * (Weather.Current?.SightFactor ?? 1); // rain hides you too
+        float range = (alert ? AlertViewRange : ViewRange) * (Weather.Current?.SightFactor ?? 1) * DeadRecon.UI.Settings.GuardSight; // rain hides you too
         var forward = -GlobalTransform.Basis.Z;
         float cos = forward.Dot(to / Math.Max(dist, .01f));
         // How much of the player he could see: terrain must not be in the way, plants let some through.
@@ -177,7 +178,7 @@ public partial class Guard : CharacterBody3D, IDamageable
             float stance = Target.Crouching ? .45f : 1f;
             float motion = Target.Running ? 1.5f : Target.Velocity.LengthSquared() < .1f ? .55f : 1f;
             float focus = cos > .85f ? 1f : .6f;                         // corner of the eye is less sharp
-            float rate = near * stance * motion * focus * 1.4f * (alert ? 4 : 1);
+            float rate = near * stance * motion * focus * 1.4f * (alert ? 4 : 1) * DeadRecon.UI.Settings.GuardSight;
             Suspicion = Math.Min(1, Suspicion + rate * dt);
             _lastKnown = Target.GlobalPosition;
             _sinceSeen = 0;
@@ -504,7 +505,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
         var eye = GlobalPosition + Vector3.Up * EyeHeight;
         float dist = eye.DistanceTo(Target.Chest);
-        float chance = Math.Clamp(.55f * (1 - dist / 110), .05f, .55f);
+        float chance = Math.Clamp(.55f * (1 - dist / 110), .05f, .55f) * DeadRecon.UI.Settings.GuardAccuracy;
         if (_warningShots > 0) { _warningShots--; chance *= .3f; } // the first shots after spotting you mostly miss: a chance to dive for cover
         if (Target.Running) chance *= .5f;
         else if (Target.Velocity.LengthSquared() > .5f) chance *= .75f;

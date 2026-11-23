@@ -29,6 +29,7 @@ public partial class Main : Node3D
 	private readonly System.Collections.Generic.List<Guard> _guards = new();
 	private Mission _mission = null!;
 	private Weather _weather = null!;
+	private DeadRecon.UI.PauseMenu _menu = null!;
 	private ColorRect _hurt = null!;
 	private Label _deathText = null!;
 	private (Vector3 position, float yaw) _spawn;
@@ -40,6 +41,7 @@ public partial class Main : Node3D
 		string Arg(string name, string fallback) =>
 			args.FirstOrDefault(a => a.StartsWith($"--{name}="))?.Split('=', 2)[1] ?? fallback;
 
+		DeadRecon.UI.Settings.Load();
 		_hud = new Label { Position = new Vector2(12, 10) };
 		_hud.AddThemeColorOverride("font_shadow_color", Colors.Black);
 		var layer = new CanvasLayer();
@@ -90,7 +92,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -121,6 +123,13 @@ public partial class Main : Node3D
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
 
+		// Player HUD (the debug text above is F3) and the Esc menu.
+		layer.AddChild(new DeadRecon.UI.Hud { Player = _walker, Rifle = _weapon, Mission = _mission, Weather = _weather });
+		_menu = new DeadRecon.UI.PauseMenu { Walker = _walker };
+		_menu.Changed += () => _hud.Visible = DeadRecon.UI.Settings.ShowDebug;
+		AddChild(_menu);
+		_hud.Visible = DeadRecon.UI.Settings.ShowDebug || testing;
+
 		string shots = Arg("shots", "");
 		if (shots != "") _ = TakeShots(shots);
 		string aiTest = Arg("aitest", "");
@@ -131,6 +140,8 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string hudTest = Arg("hudtest", "");
+		if (hudTest != "") _ = RunHudTest(hudTest);
 		string squadTest = Arg("squadtest", "");
 		if (squadTest != "") _ = RunSquadTest(squadTest);
 	}
@@ -163,6 +174,12 @@ public partial class Main : Node3D
 
 	public override void _UnhandledInput(InputEvent e)
 	{
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F3 } && _hud != null)
+		{
+			DeadRecon.UI.Settings.ShowDebug = !DeadRecon.UI.Settings.ShowDebug;
+			DeadRecon.UI.Settings.Save();
+			_hud.Visible = DeadRecon.UI.Settings.ShowDebug;
+		}
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.N } && _weather != null)
 			_weather.Cycle();
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.T } && _terrain != null)
@@ -281,6 +298,80 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Automated HUD check: the player's view (no debug text) while being noticed, shot at, at the desk, and paused.</summary>
+	private async Task RunHudTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}: {_mission.Objective()}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_hud.Visible = false;
+		_weather.AutoChange = false;
+		_walker.Invulnerable = true;
+		var patrol = _guards.First(g => !g.Sentry);
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		await Shot("0_start");
+
+		// Stand where the patroller will notice us, looking a bit to his left so the arc points at him off-centre.
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = _mission.Camp + Vector3.Up * 40;
+		for (int f = 0; f < 600 && !_terrain.HasCollisionAt(_mission.Camp); f++) await Frames(1);
+		await Seconds(1.5);
+		_walker.SetFlying(false);
+		float bestT = -1;
+		void Reposition()
+		{
+			var eye = patrol.GlobalPosition + Vector3.Up * 1.6f;
+			var fwd = -patrol.GlobalTransform.Basis.Z; fwd.Y = 0; fwd = fwd.Normalized();
+			Vector3 spot = patrol.GlobalPosition + fwd * 20; bestT = -1;
+			for (int c = 0; c < 48; c++)
+			{
+				var p = patrol.GlobalPosition + fwd.Rotated(Vector3.Up, (c % 8 - 3.5f) * .12f) * (14 + c / 8 * 3);
+				p.Y = _world.HeightAt(p.X, p.Z) + .2f;
+				float t = Foliage.RaycastTrunk(eye, p + Vector3.Up * 1.3f) == null ? Foliage.Transmission(eye, p + Vector3.Up * 1.3f) : 0;
+				if (t > bestT) { bestT = t; spot = p; }
+			}
+			_walker.GlobalPosition = spot;
+		}
+		bool gotYellow = false;
+		double moved = -10;
+		for (int f = 0; f < 1500 && patrol.State != Guard.Mood.Alert; f++)
+		{
+			double now = Time.GetTicksMsec() / 1000.0;
+			if (patrol.Suspicion < .05f && now - moved > 2.5) { moved = now; Reposition(); }
+			var d = patrol.GlobalPosition - _walker.GlobalPosition;
+			LookAt(_walker.Camera.GlobalPosition + d.Normalized().Rotated(Vector3.Up, .5f) * 10);
+			await Frames(1);
+			if (!gotYellow && patrol.Suspicion > .45f) { gotYellow = true; await Shot("1_being_noticed"); }
+		}
+		GD.Print($"[hud] visible {bestT * 100:0}%, patrol now {patrol.State} susp {patrol.Suspicion:0.00} exposure {patrol.Exposure:0.00} dist {patrol.GlobalPosition.DistanceTo(_walker.GlobalPosition):0}");
+		for (int f = 0; f < 600 && _walker.HitsTaken < 2; f++) { LookAt(_walker.Camera.GlobalPosition + (patrol.GlobalPosition - _walker.GlobalPosition).Normalized().Rotated(Vector3.Up, -.9f) * 10); await Frames(1); }
+		await Frames(2);
+		await Shot("2_shot_at");
+
+		// At the radio desk.
+		_walker.GlobalPosition = _mission.IntelAt + new Vector3(-1.4f, -.4f, -.9f);
+		LookAt(_mission.IntelAt);
+		await Frames(6);
+		await Shot("3_desk_prompt");
+
+		_menu.Show();
+		await Frames(4);
+		await Shot("4_paused");
+		_menu.Close();
 		GetTree().Quit();
 	}
 

@@ -100,13 +100,12 @@ public partial class Walker : CharacterBody3D, IDamageable
         }
         else if (e is InputEventKey { Pressed: true, Echo: false } key)
         {
-            if (key.PhysicalKeycode == Key.Escape) Input.MouseMode = Input.MouseModeEnum.Visible;
             if (key.PhysicalKeycode == Key.F && !Dead) SetFlying(!Flying);
         }
         else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured && !Dead)
         {
-            _yaw -= motion.Relative.X * Sensitivity * SensitivityScale;
-            _pitch = Math.Clamp(_pitch - motion.Relative.Y * Sensitivity * SensitivityScale, -1.5f, 1.5f);
+            _yaw -= motion.Relative.X * Sensitivity * SensitivityScale * DeadRecon.UI.Settings.MouseSensitivity;
+            _pitch = Math.Clamp(_pitch - motion.Relative.Y * Sensitivity * SensitivityScale * DeadRecon.UI.Settings.MouseSensitivity * (DeadRecon.UI.Settings.InvertY ? -1 : 1), -1.5f, 1.5f);
             ApplyLook();
         }
     }

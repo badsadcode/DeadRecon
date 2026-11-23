@@ -32,6 +32,10 @@ public partial class Mission : Node3D
     public Vector3 Extraction { get; private set; }
     public float SearchProgress { get; private set; }
     public double Elapsed { get; private set; }
+    /// <summary>Close enough to the intel to take it.</summary>
+    public bool NearIntel => State == Phase.Intel && Player.GlobalPosition.DistanceTo(IntelAt) < 2.4f && !Player.Dead;
+    /// <summary>Where the current objective is (intel or landing zone), or null when there's nothing to go to.</summary>
+    public Vector3? Target => State switch { Phase.Intel => IntelAt, Phase.Extract => Extraction, _ => null };
 
     private const float CampRadius = 13, LzRadius = 11, SearchTime = 1.6f, ExtractRadius = 7;
     private RandomNumberGenerator _rng = new();

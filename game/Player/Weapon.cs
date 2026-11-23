@@ -26,6 +26,9 @@ public partial class Weapon : Node3D
     public int Ammo { get; private set; } = MagazineSize;
     public bool Loaded { get; private set; }
     public int ShotsFired { get; private set; }
+    /// <summary>A bullet hit a person (true = that killed them). The HUD shows a hit marker.</summary>
+    public event Action<bool>? HitConfirmed;
+    public int MagazineCapacity => MagazineSize;
     public bool Scoped => _scope?.Visible == true;
     public float AimAmount => _aim;
     public bool Reloading => _reload >= 0;
@@ -165,7 +168,11 @@ public partial class Weapon : Node3D
         if (hit.Count == 0) return;
         var at = (Vector3)hit["position"];
         var collider = hit["collider"].AsGodotObject();
-        if (collider is IDamageable target) target.TakeHit(Damage, at, cam.Origin);
+        if (collider is IDamageable target)
+        {
+            target.TakeHit(Damage, at, cam.Origin);
+            HitConfirmed?.Invoke(target is DeadRecon.AI.Guard { State: DeadRecon.AI.Guard.Mood.Dead });
+        }
         else if (collider is Node { } node && node.IsInGroup("wood")) Effects.Splinters(this, at, (Vector3)hit["normal"], dir);
         else Effects.Impact(this, at, (Vector3)hit["normal"]);
     }
