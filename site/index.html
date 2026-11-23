@@ -61,6 +61,59 @@
 
       <article class="entry">
         <header class="entry-head">
+          <span class="entry-no">Entry #005</span>
+          <time datetime="2026-11-24">24 Nov 2026</time>
+          <span class="weather" title="Field conditions">🎯 Mission accomplished · Morale: smug</span>
+        </header>
+        <h3>Operation: Humid Heron (Our First Real Mission)</h3>
+
+        <p>Until today, Dead Recon was a very pretty jungle with a gun and a grumpy man in it. Today it became a <em>game</em>. There is a thing to do, a place to do it, a way to fail, and a way to win.</p>
+
+        <h4>How it works</h4>
+        <ul class="checklist">
+          <li class="done">You get a briefing: a made-up operation name, something to steal, and where to find it</li>
+          <li class="done">Somewhere in the jungle there's a small enemy camp: tents, crates, a smoky campfire and a radio desk</li>
+          <li class="done">On the desk is the thing you want. Hold <strong>E</strong> to take it</li>
+          <li class="done">Then get to the landing zone. Look for the green smoke</li>
+          <li class="done">Get there alive and you get a debrief, with a verdict</li>
+        </ul>
+
+        <figure class="shot">
+          <img src="img/005/desk.webp" alt="First-person view at a wooden radio desk with a red codebook and an olive radio with an antenna, tents and crates behind" loading="lazy" width="1280" height="520">
+          <figcaption>The radio desk. The red book is the codebook. Its owner is somewhere behind you and he is not happy.</figcaption>
+        </figure>
+
+        <h4>The same jungle, a different job</h4>
+        <p>This is the bit from the original design we care about most: <em>the geography is permanent, the operations are procedural</em>. Every time you start, the camp goes somewhere new and so does the landing zone, but the hills and rivers stay exactly where they were. The game hunts for a spot that's flat, dry and a decent walk away, clears the trees, and pitches the tents.</p>
+        <p>The operation names come out of the same word-helmet as the toy generator on this page. Today's was <strong>Operation Humid Heron</strong>. We have also seen Operation Lukewarm Spoon. We are not changing it.</p>
+
+        <h4>Meet the sentry</h4>
+        <p>The camp now has two guards: our old friend on patrol, and a brand-new sentry who stands by the radio all day. He is, somehow, even grumpier. Sample: <q>This radio has more friends than me.</q></p>
+
+        <h4>How the test run went</h4>
+        <p>We let the computer play the mission. It went like a real one: the sentry went down with one good shot (<q>...tell my mother... I was right...</q>). The patrol guard dodged, shot back, landed a hit, and then spent the rest of the mission searching the bushes (<q>Come out, I just want to shoot you a little.</q>) while we walked off with his codebook.</p>
+
+        <figure class="shot pair">
+          <img src="img/005/landing-zone.webp" alt="A clearing ringed by white stones with a plume of green smoke rising, the word EXTRACT floating above it" loading="lazy" width="1280" height="520">
+          <img src="img/005/debrief.webp" alt="Mission debrief panel: Operation Humid Heron complete, time 0:30, shots fired 11, guards down 1 of 2, times spotted 2. Messy, you were spotted, but you got it done." loading="lazy" width="1280" height="520">
+          <figcaption>The landing zone (first try at the smoke was made of green squares, like a very confused Minecraft), and the debrief. Verdict: messy, but done.</figcaption>
+        </figure>
+
+        <h4>The bug that told on us</h4>
+        <p>In one run, the guard yelled "Gunfire?!" before anyone had fired. We went looking for the culprit and found it: clicking on the game window to grab the mouse <em>also fired the gun</em>. So every single session started with a gunshot that every guard within a few hundred metres heard. Imagine sneaking into a camp after announcing yourself with a rifle shot. Fixed.</p>
+
+        <h4>The verdict from HQ</h4>
+        <blockquote class="motto">
+          <p>"It feels really good."</p>
+          <cite>— Tom, after playing it</cite>
+        </blockquote>
+        <p>That was the whole goal of Milestone 0: prove it's fun before building the rest. We'll take it.</p>
+
+        <p class="sig">— Sage, field engineer, alert level: <span class="alert-chip">Extracted</span></p>
+      </article>
+
+      <article class="entry">
+        <header class="entry-head">
           <span class="entry-no">Entry #004</span>
           <time datetime="2026-11-24">24 Nov 2026</time>
           <span class="weather" title="Field conditions">⛈️ Monsoon · Morale: damp but determined</span>
@@ -346,9 +399,9 @@
 
       <ol class="milestones">
         <li data-pct="100"><span class="ms-name">Have the idea</span><span class="bar"><i style="--p:100%"></i></span><span class="ms-note">Nailed it.</span></li>
-        <li data-pct="75"><span class="ms-name">M0 · Prototype the fun</span><span class="bar"><i style="--p:75%"></i></span><span class="ms-note">Jungle, gun, grumpy guard, monsoon: done. An actual mission: next.</span></li>
+        <li data-pct="100"><span class="ms-name">M0 · Prototype the fun</span><span class="bar"><i style="--p:100%"></i></span><span class="ms-note">Done. Tom played it: "feels really good."</span></li>
         <li data-pct="0"><span class="ms-name">M1 · Play with friends</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Friends are on standby. Friends are patient.</span></li>
-        <li data-pct="0"><span class="ms-name">M2 · Mission Director</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">See the toy version below.</span></li>
+        <li data-pct="10"><span class="ms-name">M2 · Mission Director</span><span class="bar"><i style="--p:10%"></i></span><span class="ms-note">See the toy version below.</span></li>
         <li data-pct="15"><span class="ms-name">M3 · A jungle you can learn</span><span class="bar"><i style="--p:15%"></i></span><span class="ms-note">The land stays put now. Roads and tin roofs pending.</span></li>
         <li data-pct="0"><span class="ms-name">M4 · The full 64 × 64 km</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Walking one edge takes ~13 hours. Bring snacks.</span></li>
       </ol>
@@ -359,7 +412,8 @@
         <div class="stat"><b>4–6</b><span>friends required</span></div>
         <div class="stat"><b>728,558</b><span>trees (10 models in disguise)</span></div>
         <div class="stat"><b>2</b><span>trees launched into orbit</span></div>
-        <div class="stat"><b>1</b><span>guard, grumpy (now also wet)</span></div>
+        <div class="stat"><b>2</b><span>guards, grumpy (one is a sentry)</span></div>
+        <div class="stat"><b>1</b><span>mission, actually fun</span></div>
       </div>
     </section>
 
