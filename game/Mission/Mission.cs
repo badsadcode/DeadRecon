@@ -65,6 +65,9 @@ public partial class Mission : Node3D
 
         Camp = PickSite(spawn, 170, 260, CampRadius, avoid: null) ?? spawn + new Vector3(150, 0, 0);
         Extraction = PickSite(Camp, 150, 240, LzRadius, avoid: spawn) ?? spawn;
+        // Known at planning time (guards are placed from it before the camp node is built).
+        _desk = Ground(Camp + new Vector3(1.5f, 0, 0), .4f);
+        IntelAt = _desk + new Vector3(.35f, .43f, 0);
         TreeScatter.Clearings.Clear();
         TreeScatter.Clearings.Add((new Vector2(Camp.X, Camp.Z), CampRadius + 3));
         TreeScatter.Clearings.Add((new Vector2(Extraction.X, Extraction.Z), LzRadius + 4));
@@ -72,6 +75,7 @@ public partial class Mission : Node3D
     }
 
     private string _why = "";
+    private Vector3 _desk;
 
     /// <summary>A random flat, dry spot in a ring around <paramref name="from"/> (away from <paramref name="avoid"/>).</summary>
     private Vector3? PickSite(Vector3 from, float minR, float maxR, float radius, Vector3? avoid)
@@ -172,7 +176,7 @@ public partial class Mission : Node3D
             if (_rng.Randf() < .5f) Prop(camp, new BoxMesh { Size = new Vector3(.7f, .7f, .7f) }, crate, at + Vector3.Up * .75f, _rng.Randf(), new Vector3(.7f, .7f, .7f));
         }
         // The radio desk with the intel on it.
-        var desk = Ground(Camp + new Vector3(1.5f, 0, 0), .4f);
+        var desk = _desk;
         Prop(camp, new BoxMesh { Size = new Vector3(1.6f, .8f, .8f) }, wood, desk, .3f, new Vector3(1.6f, .8f, .8f));
         var radio = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.45f, .28f, .3f) }, MaterialOverride = olive };
         camp.AddChild(radio);
@@ -182,7 +186,6 @@ public partial class Mission : Node3D
         antenna.Position = new Vector3(.15f, .65f, 0);
         _intelProp = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.24f, .05f, .32f) }, MaterialOverride = Mat(.55f, .12f, .08f) };
         camp.AddChild(_intelProp);
-        IntelAt = desk + new Vector3(.35f, .43f, 0);
         _intelProp.GlobalPosition = IntelAt;
 
         // Campfire: logs, flickering light, smoke.

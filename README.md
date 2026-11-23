@@ -36,4 +36,4 @@ WASD move · Shift run · Ctrl crouch · Space jump · LMB fire · RMB aim (scop
 N weather · T textured/painted ground · F fly · Enter new operation (after death or success).
 
 Scripted checks (each saves screenshots to the given folder and quits):
-`--missiontest=<dir>`, `--aitest=<dir>`, `--treetest=<dir>`, `--raintest=<dir>`, `--shots=<dir>`.
+`--missiontest=<dir>`, `--squadtest=<dir>`, `--aitest=<dir>`, `--treetest=<dir>`, `--raintest=<dir>`, `--shots=<dir>`.

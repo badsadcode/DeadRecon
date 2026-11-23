@@ -90,7 +90,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -131,6 +131,8 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string squadTest = Arg("squadtest", "");
+		if (squadTest != "") _ = RunSquadTest(squadTest);
 	}
 
 	public override void _Process(double delta)
@@ -279,6 +281,109 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>
+	/// Automated squad check: (1) get spotted by the patroller: does the sentry hear the alarm, and how much of the
+	/// fight does the patroller spend behind a trunk? (2) silently remove the sentry: does the patroller find the body?
+	/// </summary>
+	private async Task RunSquadTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		double Now() => Time.GetTicksMsec() / 1000.0;
+		var patrol = _guards.First(g => !g.Sentry);
+		var sentry = _guards.First(g => g.Sentry);
+
+		_weather.AutoChange = false;
+		_walker.Invulnerable = true;
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.HasCollisionAt(_mission.Camp)); f++) await Frames(1);
+		// Wait at the camp edge (flying = ignored) until collision is there for everyone.
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = _mission.Camp + Vector3.Up * 40;
+		for (int f = 0; f < 600 && !_terrain.Settled; f++) await Frames(1);
+		await Seconds(2);
+
+		// ---- 1. Spotted: alarm and cover
+		Vector3 BestSpot()
+		{
+			var eye = patrol.GlobalPosition + Vector3.Up * 1.6f;
+			var f2 = -patrol.GlobalTransform.Basis.Z; f2.Y = 0; f2 = f2.Normalized();
+			Vector3 best = Vector3.Zero; float bestT = -1;
+			for (int c = 0; c < 40; c++)
+			{
+				var p = patrol.GlobalPosition + f2.Rotated(Vector3.Up, (c % 8 - 3.5f) * .12f) * (24 + c / 8 * 3);
+				p.Y = _world.HeightAt(p.X, p.Z) + .2f;
+				float t = Foliage.RaycastTrunk(eye, p + Vector3.Up * 1.3f) == null ? Foliage.Transmission(eye, p + Vector3.Up * 1.3f) : 0;
+				if (t > bestT) { bestT = t; best = p; }
+			}
+			return best;
+		}
+		_walker.SetFlying(false);
+		double t0 = Now(), moved = 0;
+		while (patrol.State != Guard.Mood.Alert && Now() - t0 < 30)
+		{
+			if (Now() - moved > 3 && patrol.Suspicion < .3f) { moved = Now(); _walker.GlobalPosition = BestSpot(); }
+			LookAt(patrol.GlobalPosition + Vector3.Up * 1.4f);
+			await Frames(1);
+		}
+		GD.Print($"[squad] patrol alerted after {Now() - t0:0.0} s at {patrol.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m; sentry is now: {sentry.State}");
+		await Seconds(1);
+		GD.Print($"[squad] 1 s later the sentry is: {sentry.State} ({sentry.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m from you)");
+
+		int samples = 0, hidden = 0, peeking = 0, wood = 0, shotsAtMe = _walker.HitsTaken;
+		bool hidShot = false, peekShot = false;
+		_weapon.ForceAim(true);
+		for (double end = Now() + 15; Now() < end;)
+		{
+			LookAt(patrol.GlobalPosition + Vector3.Up * 1.2f);
+			await Seconds(.25);
+			samples++;
+			if (patrol.InCover && !patrol.Peeking) hidden++;
+			if (patrol.Peeking) peeking++;
+			if (Foliage.RaycastTrunk(_walker.Camera.GlobalPosition, patrol.GlobalPosition + Vector3.Up * 1.0f) != null) wood++;
+			if (!hidShot && patrol.InCover && !patrol.Peeking && samples > 8) { hidShot = true; await Shot("1_hiding"); }
+			if (!peekShot && patrol.Peeking && samples > 8) { peekShot = true; await Shot("2_peeking"); }
+		}
+		_weapon.ForceAim(false);
+		GD.Print($"[squad] 15 s of fight: patrol hiding {hidden * 100 / samples}%, peeking {peeking * 100 / samples}%, " +
+		         $"a trunk between us {wood * 100 / samples}% of the time; he hit me {_walker.HitsTaken - shotsAtMe} times; sentry: {sentry.State}");
+
+		// ---- 2. A body
+		sentry.TakeHit(500, sentry.GlobalPosition + Vector3.Up, sentry.GlobalPosition); // silently
+		// Bodies in the ferns stay hidden (by design); for this check, leave him in the open middle of the camp.
+		var open = _mission.Camp + new Vector3(-1, 0, -4);
+		sentry.GlobalPosition = new Vector3(open.X, _world.HeightAt(open.X, open.Z) + .05f, open.Z);
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = _mission.Camp + new Vector3(0, 60, 0);
+		t0 = Now();
+		bool found = false;
+		while (Now() - t0 < 90)
+		{
+			await Seconds(.25);
+			if (patrol.BodiesFound > 0) { found = true; break; }
+		}
+		GD.Print($"[squad] body: {(found ? $"found after {Now() - t0:0.0} s" : "not found in 90 s")}; patrol is {patrol.State}");
+		if (found)
+		{
+			_walker.GlobalPosition = patrol.GlobalPosition + new Vector3(5, 3, 5);
+			LookAt(patrol.GlobalPosition + Vector3.Up);
+			await Frames(4);
+			await Shot("3_found_body");
+		}
 		GetTree().Quit();
 	}
 

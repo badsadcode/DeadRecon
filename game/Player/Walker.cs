@@ -64,9 +64,15 @@ public partial class Walker : CharacterBody3D, IDamageable
         GetChild<CollisionShape3D>(0).Disabled = flying;
     }
 
+    /// <summary>Tests only: hits still flash and count, but don't reduce health.</summary>
+    public bool Invulnerable { get; set; }
+    public int HitsTaken { get; private set; }
+
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
         if (Dead || Flying) return;
+        HitsTaken++;
+        if (Invulnerable) damage = 0;
         Health = Math.Max(0, Health - damage);
         HurtFlash = 1;
         // A little flinch toward the shot.

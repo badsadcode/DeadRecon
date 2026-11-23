@@ -32,6 +32,19 @@ public partial class Guard : CharacterBody3D, IDamageable
     public int TimesAlerted { get; private set; }
 
     public Mood State { get; private set; } = Mood.Patrol;
+
+    /// <summary>Every guard in the scene (for alarms and spotting fallen colleagues).</summary>
+    public static readonly List<Guard> All = new();
+    /// <summary>True while he is crouched behind a trunk (or peeking out of it) in a fight.</summary>
+    public bool InCover => _cover != null && Flat(GlobalPosition - _cover.Value) < 1.2f;
+    public bool Peeking => _peeking;
+    public int BodiesFound { get; private set; }
+    private Vector3? _cover;
+    private Vector3 _peekSpot;
+    private bool _peeking, _hurry;
+    private float _coverTimer, _coverCheck;
+    private readonly HashSet<Guard> _bodiesSeen = new();
+    private const float AlarmRadius = 75;
     /// <summary>0..1: how sure he is that someone is there. 0.3 suspicious, 0.7 investigating, 1 alerted.</summary>
     public float Suspicion { get; private set; }
     public float Health { get; private set; } = 100;
@@ -78,6 +91,10 @@ public partial class Guard : CharacterBody3D, IDamageable
         ["hurt"] = new[] { "Ow!", "Rude!", "That's going in my report!", "Ow! My lunch!" },
         ["dead"] = new[] { "...told them I needed a vacation.", "...tell my mother... I was right..." },
         ["won"] = new[] { "And STAY down.", "That's what you get. Ugh, more paperwork." },
+        ["alarm"] = new[] { "CONTACT! Everybody up! ...Everybody? Hello?", "Over here! OVER HERE! Ugh.", "We've got company! The rude kind!" },
+        ["alarmheard"] = new[] { "What? Coming! Coming!", "Ugh, FINE, I'm coming!", "Hold on, I'm coming! Don't win without me!" },
+        ["body"] = new[] { "Dave?! ...DAVE!", "Oh no. Oh, that's going to be paperwork.", "Man down! Who's going to watch the radio now?!" },
+        ["cover"] = new[] { "Taking cover! Very bravely!", "Behind the tree! The tree is my friend!", "You can't hit me, I'm a tree now!" },
         ["tree"] = new[] { "Did a tree just... fall over? By itself?", "TIMBER! ...wait. Who said that?", "The jungle is falling apart. Like my career.",
                            "Trees don't just DO that." },
         ["squashed"] = new[] { "...a TREE? Seriously?", "...killed by... forestry..." },
@@ -85,6 +102,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     public override void _Ready()
     {
+        All.Add(this);
         _rng.Seed = (ulong)(Home.X * 73856093 + Home.Z * 19349663);
         AddChild(new CollisionShape3D { Shape = new CapsuleShape3D { Radius = .32f, Height = 1.8f }, Position = new Vector3(0, .9f, 0) });
         FloorMaxAngle = Mathf.DegToRad(50);
@@ -105,6 +123,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     public override void _ExitTree()
     {
+        All.Remove(this);
         Hearing.Made -= OnHeard;
         if (Target != null) Target.Died -= OnTargetDied;
     }
@@ -130,7 +149,8 @@ public partial class Guard : CharacterBody3D, IDamageable
     {
         _wasSeen = _seen;
         _seen = false;
-        if (Target.Dead || Target.Flying) { Suspicion = Math.Max(0, Suspicion - dt * .1f); return; }
+        LookForBodies();
+        if (Target.Dead || Target.Flying) { _sinceSeen += dt; Exposure = 0; Suspicion = Math.Max(0, Suspicion - dt * .1f); return; }
 
         var eye = GlobalPosition + Vector3.Up * EyeHeight;
         var to = Target.Chest - eye;
@@ -166,6 +186,76 @@ public partial class Guard : CharacterBody3D, IDamageable
         {
             _sinceSeen += dt;
             if (State is Mood.Patrol or Mood.Suspicious) Suspicion = Math.Max(0, Suspicion - dt * .06f);
+        }
+    }
+
+    /// <summary>
+    /// The best spot within 16 m behind a trunk (as seen from where the player was last seen), not much closer to
+    /// the player than he is now; null if there's no tree worth hiding behind.
+    /// </summary>
+    private Vector3? FindCover()
+    {
+        var here = GlobalPosition;
+        var threat = _lastKnown + Vector3.Up * 1.3f;
+        float best = float.MaxValue;
+        Vector3? pick = null;
+        foreach (var t in Foliage.TrunksNear(here, 16))
+        {
+            if (t.TrunkRadius < .18f) continue;                       // saplings don't stop bullets for long
+            var trunk = new Vector3(t.X, t.BaseY, t.Z);
+            var away = trunk - _lastKnown; away.Y = 0;
+            if (away.LengthSquared() < 4) continue;
+            away = away.Normalized();
+            var spot = trunk + away * (t.TrunkRadius + .55f);
+            spot.Y = World.HeightAt(spot.X, spot.Z);
+            if (!Foliage.Blocked(spot + Vector3.Up * EyeHeight, threat, t)) continue;
+            float cost = Flat(spot - here) + Math.Max(0, Flat(_lastKnown - here) - Flat(_lastKnown - spot)) * 1.5f;
+            if (cost < best) { best = cost; pick = spot; }
+        }
+        return pick;
+    }
+
+    private bool CoverStillGood(Vector3 spot)
+    {
+        var threat = Target.Dead ? _lastKnown : (_seen ? Target.GlobalPosition : _lastKnown);
+        return Foliage.RaycastTrunk(spot + Vector3.Up * EyeHeight, threat + Vector3.Up * 1.3f) != null;
+    }
+
+    /// <summary>A step to the side of the cover spot from which the threat is visible.</summary>
+    private Vector3 PeekSpot(Vector3 spot)
+    {
+        var to = _lastKnown - spot; to.Y = 0; to = to.Normalized();
+        var side = to.Cross(Vector3.Up);
+        foreach (float sgn in _rng.Randf() < .5f ? new[] { 1f, -1f } : new[] { -1f, 1f })
+        {
+            var p = spot + side * sgn * .95f + to * .2f;
+            p.Y = World.HeightAt(p.X, p.Z);
+            if (Foliage.RaycastTrunk(p + Vector3.Up * EyeHeight, _lastKnown + Vector3.Up * 1.3f) == null) return p;
+        }
+        return spot + side * 1.2f;
+    }
+
+    /// <summary>A fallen colleague in view: he knows something is very wrong (but not where you are).</summary>
+    private void LookForBodies()
+    {
+        if (State is Mood.Alert or Mood.Dead) return;
+        var eye = GlobalPosition + Vector3.Up * EyeHeight;
+        var forward = -GlobalTransform.Basis.Z;
+        foreach (var g in All)
+        {
+            if (g == this || g.State != Mood.Dead || _bodiesSeen.Contains(g)) continue;
+            var body = g.GlobalPosition + Vector3.Up * .3f;
+            var to = body - eye;
+            float d = to.Length();
+            if (d > ViewRange * (Weather.Current?.SightFactor ?? 1) || (forward.Dot(to / d) < ViewCos && d > 4)) continue;
+            if (!LineOfSight(eye, body) || Foliage.Transmission(eye, body) < .2f) continue;
+            _bodiesSeen.Add(g);
+            BodiesFound++;
+            _lastKnown = g.GlobalPosition;
+            Suspicion = Math.Max(Suspicion, .9f);
+            _hurry = true;
+            Enter(Mood.Investigate, "body");
+            return;
         }
     }
 
@@ -208,10 +298,46 @@ public partial class Guard : CharacterBody3D, IDamageable
 
             case Mood.Investigate:
                 if (_seen && Suspicion >= 1) { EnterAlert(); return (here, 0, _lastKnown); }
-                if (Flat(here - _lastKnown) < 2.5f || _stateTime > 40 || _stuck > 3) { StartSearch(); return (here, 0, null); }
-                return (_lastKnown, InvestigateSpeed, null);
+                if (Flat(here - _lastKnown) < 2.5f || _stateTime > 40 || _stuck > 3) { _hurry = false; StartSearch(); return (here, 0, null); }
+                return (_lastKnown, _hurry ? RunSpeed : InvestigateSpeed, null);
 
             case Mood.Alert:
+            {
+                // Fight from behind a trunk: hide, step out to shoot a burst, hide again.
+                _coverCheck -= dt;
+                if (_coverCheck <= 0)
+                {
+                    _coverCheck = 1;
+                    if (_cover is { } c && !CoverStillGood(c)) { _cover = null; _peeking = false; }
+                    if (_cover == null && _sinceSeen < 6 && FindCover() is { } found)
+                    {
+                        _cover = found; _peeking = false; _coverTimer = 0;
+                        if (_rng.Randf() < .5f) Bark("cover");
+                    }
+                }
+                if (_cover is { } spot)
+                {
+                    if (Flat(here - spot) > .9f && !_peeking) return (spot, RunSpeed, Target.GlobalPosition);
+                    _coverTimer -= dt;
+                    if (_coverTimer <= 0)
+                    {
+                        _peeking = !_peeking;
+                        _coverTimer = _peeking ? _rng.RandfRange(1.4f, 2.4f) : _rng.RandfRange(1.2f, 2.6f);
+                        if (_peeking) { _peekSpot = PeekSpot(spot); _reaction = Math.Min(_reaction, ReactionTime * .5f); }
+                    }
+                    if (_peeking)
+                    {
+                        if (_seen)
+                        {
+                            _reaction -= dt;
+                            _cooldown -= dt;
+                            if (_reaction <= 0 && _cooldown <= 0) Shoot();
+                        }
+                        return (_peekSpot, InvestigateSpeed, _lastKnown);
+                    }
+                    if (_sinceSeen < 10) return (spot, InvestigateSpeed, _lastKnown);   // hiding, waiting to peek
+                    _cover = null;                                                       // he's been quiet too long: go look
+                }
                 if (_seen)
                 {
                     if (!_wasSeen) _reaction = ReactionTime * .6f;          // spotted again: quicker this time
@@ -220,6 +346,7 @@ public partial class Guard : CharacterBody3D, IDamageable
                     if (_reaction <= 0 && _cooldown <= 0) Shoot();
                     return (here, 0, Target.GlobalPosition);
                 }
+            }
                 if (_sinceSeen > 2.5f)
                 {
                     if (_sinceSeen < 2.6f) Bark("lost");
@@ -253,11 +380,36 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (fresh) TimesAlerted++;
         Suspicion = 1;
         Enter(Mood.Alert, fresh ? "alert" : null);
-        if (fresh) { _reaction = ReactionTime; _cooldown = 0; _burst = 0; _warningShots = 3; }
+        if (fresh) { _reaction = ReactionTime; _cooldown = 0; _burst = 0; _warningShots = 3; _cover = null; _peeking = false; RaiseAlarm(); }
+    }
+
+    /// <summary>Shout: guards within earshot (less in rain) come running to roughly where he's looking.</summary>
+    private void RaiseAlarm()
+    {
+        float reach = Hearing.Carry(AlarmRadius);
+        bool anyone = false;
+        foreach (var g in All)
+        {
+            if (g == this || g.State == Mood.Dead || g.GlobalPosition.DistanceTo(GlobalPosition) > reach) continue;
+            anyone = true;
+            g.HearAlarm(_lastKnown);
+        }
+        if (anyone) _bubbleLeft = 0; // let the alarm line show instead of the alert line
+        if (anyone) Bark("alarm");
+    }
+
+    private void HearAlarm(Vector3 where)
+    {
+        if (State is Mood.Alert or Mood.Dead) return;
+        _lastKnown = where + new Vector3(_rng.RandfRange(-4, 4), 0, _rng.RandfRange(-4, 4));
+        Suspicion = Math.Max(Suspicion, .9f);
+        _hurry = true;
+        Enter(Mood.Investigate, "alarmheard");
     }
 
     private void StartSearch()
     {
+        _cover = null; _peeking = false;
         Enter(Mood.Search, "lost");
         _searchLeft = SearchTime;
         PickSearchPoint();
@@ -307,7 +459,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
         if (State == Mood.Dead) return;
-        bool headshot = at.Y - GlobalPosition.Y > 1.45f;
+        bool headshot = at.Y - GlobalPosition.Y > 1.45f * (1 - .32f * _crouch);
         Health -= headshot ? damage * 3 : damage;
         GD.Print($"[guard] hit for {(headshot ? damage * 3 : damage):0}{(headshot ? " (headshot)" : "")}, health {Math.Max(Health, 0):0}");
         if (Health <= 0) { Die(squashed: damage >= 60); return; } // only falling trees hit that hard
@@ -429,7 +581,17 @@ public partial class Guard : CharacterBody3D, IDamageable
         float aim = State == Mood.Alert && _seen ? _head.Rotation.X : 0;
         _gunPivot.Rotation = _gunPivot.Rotation.Lerp(new Vector3(ready ? aim : -.55f, ready ? 0 : .5f, 0), Math.Min(1, dt * 6));
         _rig.Position = new Vector3(0, MathF.Abs(MathF.Sin(_walkPhase)) * .03f * Math.Min(speed, 1), 0);
+
+        // Crouch behind cover (body and hitbox), stand to peek.
+        bool crouch = State == Mood.Alert && InCover && !_peeking;
+        _crouch = Mathf.MoveToward(_crouch, crouch ? 1 : 0, dt * 5);
+        _rig.Scale = new Vector3(1, 1 - .32f * _crouch, 1);
+        var shape = (CapsuleShape3D)GetChild<CollisionShape3D>(0).Shape;
+        shape.Height = 1.8f - .58f * _crouch;
+        GetChild<CollisionShape3D>(0).Position = new Vector3(0, shape.Height * .5f, 0);
     }
+
+    private float _crouch;
 
     private void Fall(float dt)
     {

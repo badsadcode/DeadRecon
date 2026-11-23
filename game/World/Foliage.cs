@@ -87,6 +87,18 @@ public static class Foliage
         return MathF.Exp(-depth);
     }
 
+    /// <summary>True if the straight line a-b passes through this plant's trunk.</summary>
+    public static bool Blocked(Vector3 a, Vector3 b, Plant p)
+    {
+        var d = b - a;
+        float len2 = d.X * d.X + d.Z * d.Z;
+        if (len2 < 1e-6f || p.TrunkRadius <= 0) return false;
+        float t = Math.Clamp(((p.X - a.X) * d.X + (p.Z - a.Z) * d.Z) / len2, 0, 1);
+        float cx = a.X + d.X * t - p.X, cz = a.Z + d.Z * t - p.Z;
+        float h = a.Y + d.Y * t - p.BaseY;
+        return cx * cx + cz * cz < p.TrunkRadius * p.TrunkRadius && h > 0 && h < p.TrunkTop;
+    }
+
     /// <summary>Plants with a trunk whose axis is within <paramref name="radius"/> m of a point (tests, tools).</summary>
     public static List<Plant> TrunksNear(Vector3 at, float radius)
     {
