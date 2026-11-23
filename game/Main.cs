@@ -100,6 +100,8 @@ public partial class Main : Node3D
 		if (shots != "") _ = TakeShots(shots);
 		string aiTest = Arg("aitest", "");
 		if (aiTest != "") _ = RunAiTest(aiTest);
+		string treeTest = Arg("treetest", "");
+		if (treeTest != "") _ = RunTreeTest(treeTest);
 	}
 
 	public override void _Process(double delta)
@@ -244,6 +246,108 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>
+	/// Automated tree check: shoot a sapling and a big tree until each falls. Logs hits needed and what the guard
+	/// made of it; screenshots of splinters, falling and fallen. Then quit.
+	/// </summary>
+	private async Task RunTreeTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double s) => await ToSignal(GetTree().CreateTimer(s), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}: trees felled {_trees.TreesFelled}, guard {GuardStatus()}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		// A trunk we can see directly (it's the first thing a shot at it would hit), within a size band.
+		Foliage.Plant? Pick(float minR, float maxR, float minDist, float maxDist)
+		{
+			var eye = _walker.Camera.GlobalPosition;
+			Foliage.Plant? best = null; float bestD = float.MaxValue;
+			foreach (var p in Foliage.TrunksNear(_walker.GlobalPosition, maxDist))
+			{
+				if (p.TrunkRadius < minR || p.TrunkRadius > maxR) continue;
+				var aim = new Vector3(p.X, p.BaseY + 1.3f, p.Z);
+				float d = eye.DistanceTo(aim);
+				if (d < minDist || d > bestD) continue;
+				if (Foliage.RaycastTrunk(eye, aim + (aim - eye).Normalized() * 2) is not { } first || !first.Plant.Equals(p)) continue;
+				best = p; bestD = d;
+			}
+			return best;
+		}
+		async Task<int> FellIt(Foliage.Plant p, string label)
+		{
+			int felledBefore = _trees.TreesFelled, shots = 0;
+			_weapon.ForceAim(true);
+			while (_trees.TreesFelled == felledBefore && shots < 400)
+			{
+				LookAt(new Vector3(p.X, p.BaseY + 1.2f, p.Z));
+				await Frames(2);
+				if (_weapon.Ammo == 0) _weapon.TestReload();
+				_weapon.TestFire();
+				shots++;
+				if (shots == 1) { await Frames(2); await Shot($"{label}_1_splinters"); }
+				await Frames(3);
+			}
+			_weapon.ForceAim(false);
+			GD.Print($"[test] {label}: trunk radius {p.TrunkRadius:0.00} m, felled after {shots} shots");
+			// Watch from the side: fly 10 m off to the side of the line of fire (the guard ignores a flying player).
+			var back = _walker.GlobalPosition;
+			var trunk = new Vector3(p.X, p.BaseY, p.Z);
+			var line = (trunk - back); line.Y = 0; line = line.Normalized();
+			var view = trunk - line * 4 + line.Cross(Vector3.Up) * 10;
+			_walker.SetFlying(true);
+			_walker.GlobalPosition = new Vector3(view.X, _world.HeightAt(view.X, view.Z) + .6f, view.Z);
+			LookAt(trunk + line * 5 + Vector3.Up * 3.5f);
+			await Seconds(1.2);
+			await Shot($"{label}_2_falling");
+			await Seconds(3.5);
+			LookAt(trunk + line * 4 + Vector3.Up * 1f);
+			await Frames(3);
+			await Shot($"{label}_3_fallen");
+			_walker.GlobalPosition = back;
+			_walker.SetFlying(false);
+			await Frames(3);
+			return shots;
+		}
+
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0); f++) await Frames(1);
+		await Seconds(1);
+		var sapling = Pick(.05f, .15f, 5, 25);
+		var tree = Pick(.24f, .5f, 8, 30);
+		GD.Print($"[test] sapling {(sapling is { } a ? $"r {a.TrunkRadius:0.00} m" : "none")}, tree {(tree is { } b ? $"r {b.TrunkRadius:0.00} m" : "none")}");
+		if (sapling is { } s1) await FellIt(s1, "sapling");
+		await Seconds(2);
+		GD.Print($"[test] guard after the crash: {GuardStatus()}");
+		if (tree is { } t1) await FellIt(t1, "tree");
+		// Scattered shots: 15 hits spread from 0.5 to 3.5 m up a big trunk should scar it, not cut it.
+		if (Pick(.24f, .5f, 8, 30) is { } t2)
+		{
+			int before = _trees.TreesFelled;
+			_weapon.ForceAim(true);
+			for (int k = 0; k < 15; k++)
+			{
+				LookAt(new Vector3(t2.X, t2.BaseY + .5f + 3f * (k % 7) / 6f, t2.Z));
+				await Frames(2);
+				if (_weapon.Ammo == 0) _weapon.TestReload();
+				_weapon.TestFire();
+				await Frames(2);
+			}
+			_weapon.ForceAim(false);
+			GD.Print($"[test] scattered: 15 hits over 3 m on a {t2.TrunkRadius:0.00} m trunk -> worst band at {_trees.WorstBand(t2) * 100:0}% of cutting, felled {_trees.TreesFelled > before}");
+		}
+		await Seconds(1);
+		GD.Print($"[test] done: felled {_trees.TreesFelled}, guard {GuardStatus()}");
 		GetTree().Quit();
 	}
 

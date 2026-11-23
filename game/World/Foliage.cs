@@ -5,7 +5,7 @@ using Godot;
 namespace DeadRecon.World;
 
 /// <summary>
-/// What plants are in the way, for AI sight (not for physics or rendering). TreeScatter and GroundCover register
+/// What plants are in the way: for AI sight, and trunks for bullets (not for walking into, and not for rendering). TreeScatter and GroundCover register
 /// every plant they place; <see cref="Transmission"/> says how much of a sight line gets through.
 /// <para>Each plant is a solid trunk (a vertical cylinder that blocks completely) plus a leafy volume (a vertical
 /// cylinder between two heights that lets some light through, per metre travelled inside it).</para>
@@ -17,7 +17,12 @@ public static class Foliage
         float X, float Z, float BaseY,
         float TrunkRadius, float TrunkTop,               // metres above BaseY; 0 radius = no trunk
         float LeafBottom, float LeafTop, float LeafRadius,
-        float Density);                                  // optical depth per metre inside the leaves
+        float Density,                                   // optical depth per metre inside the leaves
+        object? Tag = null);                             // who placed it (trees: a handle TreeScatter understands)
+
+    /// <summary>A bullet hit a trunk: (plant, hit point, bullet direction, damage). TreeScatter listens.</summary>
+    public static event Action<Plant, Vector3, Vector3, float>? TrunkHit;
+    public static void ReportHit(Plant plant, Vector3 at, Vector3 direction, float damage) => TrunkHit?.Invoke(plant, at, direction, damage);
 
     private const float BucketSize = 4;
     private static readonly Dictionary<(int, int), List<(int Owner, Plant P)>> Buckets = new();
@@ -61,6 +66,75 @@ public static class Foliage
         }
     }
 
+    /// <summary>Plants with a trunk whose axis is within <paramref name="radius"/> m of a point (tests, tools).</summary>
+    public static List<Plant> TrunksNear(Vector3 at, float radius)
+    {
+        var found = new HashSet<Plant>();
+        for (int bz = Key(at.Z - radius); bz <= Key(at.Z + radius); bz++)
+        for (int bx = Key(at.X - radius); bx <= Key(at.X + radius); bx++)
+            if (Buckets.TryGetValue((bx, bz), out var list))
+                foreach (var (_, p) in list)
+                    if (p.TrunkRadius > 0 && new Vector2(p.X - at.X, p.Z - at.Z).Length() <= radius) found.Add(p);
+        return new List<Plant>(found);
+    }
+
+    /// <summary>Remove one plant (a felled tree) wherever it is filed.</summary>
+    public static void RemovePlant(Plant plant)
+    {
+        float reach = Math.Max(plant.LeafRadius, plant.TrunkRadius);
+        bool removed = false;
+        for (int bz = Key(plant.Z - reach); bz <= Key(plant.Z + reach); bz++)
+        for (int bx = Key(plant.X - reach); bx <= Key(plant.X + reach); bx++)
+            if (Buckets.TryGetValue((bx, bz), out var list) && list.RemoveAll(e => e.P.Equals(plant)) > 0) removed = true;
+        if (removed) Count--;
+    }
+
+    /// <summary>
+    /// The first trunk a straight shot from <paramref name="a"/> to <paramref name="b"/> runs into, if any:
+    /// fraction along the line (0..1), hit point, outward normal and the plant.
+    /// </summary>
+    public static (float T, Vector3 Point, Vector3 Normal, Plant Plant)? RaycastTrunk(Vector3 a, Vector3 b)
+    {
+        var d = b - a;
+        float len2 = d.X * d.X + d.Z * d.Z;
+        if (len2 < 1e-6f) return null;
+        (float T, Vector3 Point, Vector3 Normal, Plant Plant)? best = null;
+        foreach (var p in Candidates(a, d))
+        {
+            if (p.TrunkRadius <= 0) continue;
+            // Solve |(a + t d) - c|^2 = r^2 in plan view (x, z).
+            float fx = a.X - p.X, fz = a.Z - p.Z;
+            float bq = 2 * (fx * d.X + fz * d.Z), cq = fx * fx + fz * fz - p.TrunkRadius * p.TrunkRadius;
+            float disc = bq * bq - 4 * len2 * cq;
+            if (disc < 0) continue;
+            float t = (-bq - MathF.Sqrt(disc)) / (2 * len2);
+            if (t < 0 || t > 1 || (best is { } bb && t >= bb.T)) continue;
+            var hit = a + d * t;
+            float h = hit.Y - p.BaseY;
+            if (h < 0 || h > p.TrunkTop) continue;
+            var n = new Vector3(hit.X - p.X, 0, hit.Z - p.Z).Normalized();
+            best = (t, hit, n, p);
+        }
+        return best;
+    }
+
+    private static HashSet<Plant> Candidates(Vector3 a, Vector3 d)
+    {
+        var candidates = new HashSet<Plant>();
+        float len = new Vector2(d.X, d.Z).Length();
+        int steps = Math.Max(1, (int)MathF.Ceiling(len / (BucketSize * .5f)));
+        var lastKey = (int.MinValue, int.MinValue);
+        for (int s = 0; s <= steps; s++)
+        {
+            float t = s / (float)steps;
+            var key = (Key(a.X + d.X * t), Key(a.Z + d.Z * t));
+            if (key == lastKey) continue;
+            lastKey = key;
+            if (Buckets.TryGetValue(key, out var list)) foreach (var (_, p) in list) candidates.Add(p);
+        }
+        return candidates;
+    }
+
     /// <summary>
     /// 0..1: how much of the straight line from <paramref name="a"/> to <paramref name="b"/> gets through the plants.
     /// 0 = a trunk is in the way (or the leaves are thick), 1 = clear.
@@ -71,17 +145,7 @@ public static class Foliage
         float len = new Vector2(d.X, d.Z).Length();
         if (len < .01f) return 1;
         // Candidate plants: every bucket the line passes over (plants are filed in all buckets they touch).
-        var candidates = new HashSet<Plant>();
-        int steps = (int)MathF.Ceiling(len / (BucketSize * .5f));
-        var lastKey = (int.MinValue, int.MinValue);
-        for (int s = 0; s <= steps; s++)
-        {
-            float t = s / (float)steps;
-            var key = (Key(a.X + d.X * t), Key(a.Z + d.Z * t));
-            if (key == lastKey) continue;
-            lastKey = key;
-            if (Buckets.TryGetValue(key, out var list)) foreach (var (_, p) in list) candidates.Add(p);
-        }
+        var candidates = Candidates(a, d);
 
         float depth = 0;
         foreach (var p in candidates)

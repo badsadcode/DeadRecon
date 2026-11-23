@@ -66,6 +66,100 @@ public static class Effects
         context.GetTree().CreateTimer(1.5).Timeout += dust.QueueFree;
     }
 
+    private static StandardMaterial3D? _splinter, _bark;
+    private static AudioStreamWav? _thock, _crash;
+    private static readonly Queue<Node3D> BarkMarks = new();
+
+    /// <summary>A bullet hits wood: pale bark mark on the trunk, a burst of splinters, a dull "thock".</summary>
+    public static void Splinters(Node context, Vector3 at, Vector3 normal, Vector3 bulletDir)
+    {
+        var scene = context.GetTree().CurrentScene;
+        var n = normal.Normalized();
+        var side = Math.Abs(n.Y) < .9f ? n.Cross(Vector3.Up).Normalized() : n.Cross(Vector3.Right).Normalized();
+        var basis = new Basis(side, n, side.Cross(n));
+
+        _bark ??= new StandardMaterial3D { AlbedoColor = new Color(.78f, .66f, .45f), Roughness = 1 };
+        var mark = new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = .04f, BottomRadius = .05f, Height = .01f, RadialSegments = 7, Rings = 0 },
+            MaterialOverride = _bark, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        scene.AddChild(mark);
+        mark.GlobalTransform = new Transform3D(basis, at + n * .004f);
+        BarkMarks.Enqueue(mark);
+        while (BarkMarks.Count > 120) { var old = BarkMarks.Dequeue(); if (GodotObject.IsInstanceValid(old)) old.QueueFree(); }
+
+        _splinter ??= new StandardMaterial3D
+        {
+            AlbedoColor = new Color(.72f, .58f, .38f), BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        };
+        // Splinters fly back out of the hole, roughly mirrored around the trunk surface.
+        var outDir = (n * 1.2f - bulletDir.Normalized() * .4f).Normalized();
+        var burst = new CpuParticles3D
+        {
+            Emitting = true, OneShot = true, Amount = 22, Lifetime = .8f, Explosiveness = 1,
+            Direction = Vector3.Up, Spread = 40, InitialVelocityMin = 2.5f, InitialVelocityMax = 6f, Gravity = new Vector3(0, -9, 0),
+            ScaleAmountMin = .4f, ScaleAmountMax = 1.3f, Mesh = new QuadMesh { Size = new Vector2(.025f, .07f) },
+            MaterialOverride = _splinter, AngularVelocityMin = -720, AngularVelocityMax = 720,
+        };
+        scene.AddChild(burst);
+        var up = outDir;
+        var s2 = Math.Abs(up.Y) < .9f ? up.Cross(Vector3.Up).Normalized() : up.Cross(Vector3.Right).Normalized();
+        burst.GlobalTransform = new Transform3D(new Basis(s2, up, s2.Cross(up)), at);
+        context.GetTree().CreateTimer(1.2).Timeout += burst.QueueFree;
+
+        _thock ??= Thock();
+        var sound = new AudioStreamPlayer3D { Stream = _thock, UnitSize = 6, MaxDistance = 120, PitchScale = (float)GD.RandRange(.85, 1.15) };
+        scene.AddChild(sound);
+        sound.GlobalPosition = at;
+        sound.Play();
+        sound.Finished += sound.QueueFree;
+    }
+
+    /// <summary>Creak, crack and a long crashing rumble: a tree coming down.</summary>
+    public static AudioStreamWav TreeCrash()
+    {
+        if (_crash != null) return _crash;
+        const int Rate = 44100;
+        int n = (int)(Rate * 3.2f);
+        var data = new byte[n * 2];
+        var rng = new Random(1912);
+        float low = 0, mid = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate;
+            float noise = (float)rng.NextDouble() * 2 - 1;
+            low += (noise - low) * .015f;
+            mid += (noise - mid) * .12f;
+            float creak = t < .9f ? MathF.Sin(MathF.Tau * (180 + 60 * MathF.Sin(t * 9)) * t) * .25f * (t / .9f) : 0;
+            float crack = t is > .85f and < 1.05f ? mid * 2.2f * MathF.Exp(-(t - .85f) * 25) : 0;
+            float crash = t > 1.9f ? (low * 9 + mid * .8f) * MathF.Exp(-(t - 1.9f) * 2.2f) : 0;
+            float s = Math.Clamp(creak + crack + crash, -1, 1);
+            short v = (short)(s * 28000);
+            data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
+        }
+        return _crash = Wav(data, Rate);
+    }
+
+    private static AudioStreamWav Thock()
+    {
+        const int Rate = 44100;
+        int n = (int)(Rate * .12f);
+        var data = new byte[n * 2];
+        var rng = new Random(3);
+        float lp = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate;
+            lp += (((float)rng.NextDouble() * 2 - 1) - lp) * .25f;
+            float s = (MathF.Sin(MathF.Tau * 320 * t) * .6f + lp * .8f) * MathF.Exp(-t * 45);
+            short v = (short)(Math.Clamp(s, -1, 1) * 24000);
+            data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
+        }
+        return Wav(data, Rate);
+    }
+
     /// <summary>Additive star-shaped flash, camera-facing.</summary>
     public static StandardMaterial3D FlashMaterial()
     {

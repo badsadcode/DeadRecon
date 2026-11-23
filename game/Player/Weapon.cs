@@ -87,6 +87,7 @@ public partial class Weapon : Node3D
     public void ForceAim(bool on) { _forceAim = on; _aim = on ? 1 : 0; }
     public void FlashForShot() { _flash = 0; }
     public void TestFire() { _cooldown = 0; Fire(); }
+    public void TestReload() { Ammo = MagazineSize; }
 
     public override void _Process(double delta)
     {
@@ -149,9 +150,19 @@ public partial class Weapon : Node3D
         query.Exclude = new Godot.Collections.Array<Rid> { Walker.GetRid() };
         var hit = GetWorld3D().DirectSpaceState.IntersectRay(query);
         Hearing.Make(cam.Origin, Hearing.Gunshot, Walker);
+        // Trunks aren't physics objects; ask the foliage registry whether one is closer than whatever the ray hit.
+        var end = hit.Count > 0 ? (Vector3)hit["position"] : cam.Origin + dir * Range;
+        if (DeadRecon.World.Foliage.RaycastTrunk(cam.Origin, end) is { } wood)
+        {
+            Effects.Splinters(this, wood.Point, wood.Normal, dir);
+            DeadRecon.World.Foliage.ReportHit(wood.Plant, wood.Point, dir, Damage);
+            return;
+        }
         if (hit.Count == 0) return;
         var at = (Vector3)hit["position"];
-        if (hit["collider"].AsGodotObject() is IDamageable target) target.TakeHit(Damage, at, cam.Origin);
+        var collider = hit["collider"].AsGodotObject();
+        if (collider is IDamageable target) target.TakeHit(Damage, at, cam.Origin);
+        else if (collider is Node { } node && node.IsInGroup("wood")) Effects.Splinters(this, at, (Vector3)hit["normal"], dir);
         else Effects.Impact(this, at, (Vector3)hit["normal"]);
     }
 

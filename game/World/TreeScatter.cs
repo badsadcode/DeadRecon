@@ -44,6 +44,25 @@ public partial class TreeScatter : Node3D
     /// <summary>Cells in range not planted yet (0 = the view is complete).</summary>
     public int Pending { get; private set; } = 1;
 
+    /// <summary>One tree that bullets can hurt: where it lives in the MultiMesh, and how much it has left.</summary>
+    private sealed class TreeRef
+    {
+        public (uint, uint, uint) Key;          // stable identity (grid cell + layer salt): survives unloading
+        public Part? Part;
+        public int Index;
+        public Foliage.Plant Plant;
+        public float Toughness, Scale, HeightScale, Yaw, TrunkTop;
+        public Vector3 Base;
+        public bool Felled;
+        /// <summary>Damage per 0.5 m height band of the trunk: grouped shots cut, scattered shots only scar.</summary>
+        public readonly Dictionary<int, float> Bands = new();
+    }
+
+    // Felled trees stay felled (and keep their stump) when their cell is unloaded and planted again: key -> cut height.
+    private static readonly Dictionary<(uint, uint, uint), float> FelledTrees = new();
+    private const float BandHeight = .5f, Spill = .45f;   // a hit also weakens the bands just above and below by Spill
+    private const float WoodToughness = 1100;              // per band: toughness * scale^2 -> sapling ~3-7 grouped hits, big tree ~20-70
+
     private sealed class Part
     {
         public int Variant;
@@ -59,6 +78,7 @@ public partial class TreeScatter : Node3D
         public readonly List<Part> Parts = new();
         public int Trees;
         public int Foliage;   // handle in World.Foliage (sight blocking)
+        public readonly List<Node3D> Stumps = new();
     }
 
     public override void _Ready()
@@ -76,6 +96,7 @@ public partial class TreeScatter : Node3D
             if (!ok) break;
             _variants.Add(lods);
         }
+        Foliage.TrunkHit += OnTrunkHit;
         if (_variants.Count == 0) GD.PushWarning("No trees found in res://assets/trees (Jungle_tree_NN_LODn.glb). The jungle will be bald.");
         _cellsPerSide = (int)MathF.Ceiling(World.Size / CellSize);
     }
@@ -121,7 +142,7 @@ public partial class TreeScatter : Node3D
 
         var drop = new List<(int, int)>();
         foreach (var (key, cell) in _cells)
-            if (!keep.Contains(key)) { foreach (var part in cell.Parts) part.Node.QueueFree(); DeadRecon.World.Foliage.Remove(cell.Foliage); drop.Add(key); }
+            if (!keep.Contains(key)) { foreach (var part in cell.Parts) part.Node.QueueFree(); foreach (var st in cell.Stumps) { Foliage.Remove((int)st.GetMeta("foliage")); st.QueueFree(); } DeadRecon.World.Foliage.Remove(cell.Foliage); drop.Add(key); }
         foreach (var key in drop) _cells.Remove(key);
         TreesShown = shown;
     }
@@ -169,6 +190,8 @@ public partial class TreeScatter : Node3D
     {
         var cell = new Cell();
         var blockers = new List<Foliage.Plant>();
+        var refs = new List<(int Slot, TreeRef Ref)>();
+        var stumps = new List<(Transform3D Xf, int Variant, float Cut)>();
         var picks = new int[VariantsPerCell];
         for (int k = 0; k < VariantsPerCell; k++) picks[k] = (int)(Hash((uint)i, (uint)j, 11u + (uint)k) % (uint)_variants.Count);
         float x0 = i * CellSize - World.Half, z0 = j * CellSize - World.Half;
@@ -201,11 +224,24 @@ public partial class TreeScatter : Node3D
                 var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(scale, scale * (.9f + .25f * Unit(Hash(ax, az, s + 9))), scale));
                 int k2 = (int)(Hash(ax, az, s + 6) % VariantsPerCell);
                 float baseY = World.HeightAt(x, z);
+                var key = (ax, az, s);
+                if (FelledTrees.TryGetValue(key, out float cutAt))
+                {
+                    stumps.Add((new Transform3D(basis, new Vector3(x, baseY - .3f * scale, z)), picks[k2], cutAt));
+                    continue;
+                }
+                var treeRef = new TreeRef
+                {
+                    Key = key, Index = trees[k2].Count, Toughness = WoodToughness * scale * scale, Scale = scale,
+                    HeightScale = basis.Y.Length(), Yaw = yaw, Base = new Vector3(x, baseY, z), TrunkTop = TreeHeight * scale * .62f,
+                };
                 trees[k2].Add(new Transform3D(basis, new Vector3(x, baseY - .3f * scale, z)));
-                // For AI sight: trunk up to where the crown starts, crown as a leafy cylinder. Model is ~17 m tall.
+                // For AI sight and bullets: trunk up to where the crown starts, crown as a leafy cylinder. Model is ~17 m tall.
                 float height = TreeHeight * scale, trunkR = .32f * scale;
-                blockers.Add(new Foliage.Plant(x, z, baseY, Math.Max(trunkR, .06f), height * .62f,
-                                               height * .55f, height, 3.2f * scale, layer.LodBias > 0 ? .55f : .35f));
+                treeRef.Plant = new Foliage.Plant(x, z, baseY, Math.Max(trunkR, .06f), height * .62f,
+                                                  height * .55f, height, 3.2f * scale, layer.LodBias > 0 ? .55f : .35f, treeRef);
+                blockers.Add(treeRef.Plant);
+                refs.Add((k2, treeRef));
                 tints[k2].Add(Tint(Hash(ax, az, s + 10), layer.Shade));
             }
             for (int k = 0; k < VariantsPerCell; k++)
@@ -213,12 +249,143 @@ public partial class TreeScatter : Node3D
                 if (trees[k].Count == 0) continue;
                 var node = new MultiMeshInstance3D();
                 AddChild(node);
-                cell.Parts.Add(new Part { Variant = picks[k], Layer = layer, Node = node, Trees = trees[k].ToArray(), Tints = tints[k].ToArray() });
+                var part = new Part { Variant = picks[k], Layer = layer, Node = node, Trees = trees[k].ToArray(), Tints = tints[k].ToArray() };
+                cell.Parts.Add(part);
                 cell.Trees += trees[k].Count;
+                foreach (var (slot, r) in refs) if (slot == k) r.Part = part;
             }
+            refs.Clear();
         }
         cell.Foliage = DeadRecon.World.Foliage.Add(blockers);
+        foreach (var (xf, variant, cut) in stumps) cell.Stumps.Add(Stump(xf, variant, cut));
         return cell;
+    }
+
+    // ================================================================= bullets vs trees
+
+    public override void _ExitTree() => Foliage.TrunkHit -= OnTrunkHit;
+
+    /// <summary>Raised when a tree comes down: (base position, falling direction).</summary>
+    public event Action<Vector3, Vector3>? TreeFelled;
+    public int TreesFelled { get; private set; }
+
+    private void OnTrunkHit(Foliage.Plant plant, Vector3 at, Vector3 direction, float damage)
+    {
+        if (plant.Tag is not TreeRef r || r.Felled || r.Part == null) return;
+        float h = at.Y - r.Base.Y;
+        int band = (int)MathF.Floor(h / BandHeight);
+        void Add(int b, float d) => r.Bands[b] = (r.Bands.TryGetValue(b, out var v) ? v : 0) + d;
+        Add(band, damage);
+        Add(band - 1, damage * Spill);
+        Add(band + 1, damage * Spill);
+        if (r.Bands[band] >= r.Toughness)
+        {
+            // Cut through the middle of the band, but leave at least a knee-high stump and some log to fall.
+            float cut = Math.Clamp((band + .5f) * BandHeight, .35f, r.TrunkTop - 1f);
+            Fell(r, direction, cut);
+        }
+    }
+
+    /// <summary>For tests: the most damaged band of a trunk as a share of what cuts it (0..1), or -1.</summary>
+    public float WorstBand(Foliage.Plant plant)
+    {
+        if (plant.Tag is not TreeRef r || r.Bands.Count == 0) return plant.Tag is TreeRef ? 0 : -1;
+        float worst = 0;
+        foreach (var v in r.Bands.Values) worst = Math.Max(worst, v);
+        return worst / r.Toughness;
+    }
+
+    private void Fell(TreeRef r, Vector3 direction, float cutHeight)
+    {
+        r.Felled = true;
+        FelledTrees[r.Key] = cutHeight;
+        TreesFelled++;
+        var part = r.Part!;
+        // Hide it in the MultiMesh (now and for every later LOD rebuild).
+        var gone = new Transform3D(Basis.Identity.Scaled(Vector3.One * .0001f), r.Base - Vector3.Up * 50);
+        part.Trees[r.Index] = gone;
+        part.Node.Multimesh?.SetInstanceTransform(r.Index, gone);
+        Foliage.RemovePlant(r.Plant);
+
+        var scene = GetTree().CurrentScene;
+        float s = r.Scale, height = TreeHeight * r.HeightScale, cut = cutHeight;
+        var treeXf = new Transform3D(new Basis(Vector3.Up, r.Yaw).Scaled(new Vector3(s, r.HeightScale, s)), r.Base - Vector3.Up * .3f * s);
+        float modelCut = (cut + .3f * s) / r.HeightScale;   // the cut height in the tree model's own space
+        var dir = new Vector3(direction.X, 0, direction.Z);
+        dir = dir.LengthSquared() > 1e-4f ? dir.Normalized() : Vector3.Forward;
+
+        // The falling part: the tree's own full-detail mesh on a rigid body, cut just above the stump.
+        var body = new RigidBody3D
+        {
+            Mass = 40 + 260 * s * s * s, ContinuousCd = true, CanSleep = true,
+            CenterOfMassMode = RigidBody3D.CenterOfMassModeEnum.Custom, CenterOfMass = new Vector3(0, height * .55f, 0),
+            PhysicsMaterialOverride = new PhysicsMaterial { Friction = .9f, Bounce = .05f },
+            ContactMonitor = true, MaxContactsReported = 4,
+        };
+        body.AddToGroup("wood");
+        var mesh = new MeshInstance3D
+        {
+            Mesh = Sliced(part.Variant, modelCut, above: true),
+            Transform = new Transform3D(treeXf.Basis, new Vector3(0, -cut - .3f * s, 0)),
+        };
+        body.AddChild(mesh);
+        float trunkLen = Math.Max(height * .62f - cut, .5f), trunkR = Math.Max(.28f * s, .07f);
+        body.AddChild(new CollisionShape3D { Shape = new CapsuleShape3D { Radius = trunkR, Height = Math.Max(trunkLen, trunkR * 2.2f) }, Position = new Vector3(0, trunkLen * .5f, 0) });
+        body.AddChild(new CollisionShape3D { Shape = new SphereShape3D { Radius = 2.4f * s }, Position = new Vector3(0, height * .8f - cut, 0) });
+        scene.AddChild(body);
+        body.GlobalPosition = r.Base + Vector3.Up * (cut + .05f);
+        // Start it tipping toward where the bullets were going (plus a little sideways luck); gravity does the rest.
+        // Not an impulse: in its first frame the body's mass isn't computed yet (Godot treats it as 1 kg), which once
+        // turned a 19 m tree into a 246 m/s rocket. A starting spin doesn't care about mass.
+        var fallDir = (dir + dir.Cross(Vector3.Up) * (float)GD.RandRange(-.25, .25)).Normalized();
+        body.AngularVelocity = Vector3.Up.Cross(fallDir) * .45f; // top moves toward fallDir
+
+        // Falling trees hurt whatever they land on (while they're still moving fast).
+        double born = Time.GetTicksMsec() / 1000.0;
+        body.BodyEntered += other =>
+        {
+            if (Time.GetTicksMsec() / 1000.0 - born > 6 || body.LinearVelocity.Length() + body.AngularVelocity.Length() * height * .5f < 3) return;
+            if (other is DeadRecon.Combat.IDamageable victim)
+                victim.TakeHit(60 + 140 * s, other is Node3D n3 ? n3.GlobalPosition + Vector3.Up * 1.7f : body.GlobalPosition, body.GlobalPosition);
+        };
+        // After it settles, stop simulating it (it stays where it fell).
+        GetTree().CreateTimer(20).Timeout += () => { if (IsInstanceValid(body)) body.Freeze = true; };
+
+        var stump = Stump(treeXf, part.Variant, cut);
+        foreach (var c in _cells.Values) if (c.Parts.Contains(part)) { c.Stumps.Add(stump); break; }
+
+        var crash = new AudioStreamPlayer3D { Stream = DeadRecon.Combat.Effects.TreeCrash(), UnitSize = 18, MaxDistance = 500, VolumeDb = 4 };
+        scene.AddChild(crash);
+        crash.GlobalPosition = r.Base + Vector3.Up * 2;
+        crash.Play();
+        crash.Finished += crash.QueueFree;
+        GetTree().CreateTimer(1.9).Timeout += () => DeadRecon.Combat.Hearing.Make(r.Base, 140, this); // the crash, not the creak
+        GD.Print($"[trees] felled a tree (scale {s:0.00}, {height:0} m) toward {dir}");
+        TreeFelled?.Invoke(r.Base, dir);
+    }
+
+    private static StandardMaterial3D? _freshWood;
+    private readonly Dictionary<(int, int, bool), ArrayMesh> _slices = new();
+
+    /// <summary>The tree model cut at a height (model space), above or below, with a fresh-wood cap. Cached per 5 cm.</summary>
+    private ArrayMesh Sliced(int variant, float modelCut, bool above)
+    {
+        var key = (variant, (int)MathF.Round(modelCut * 20), above);
+        if (_slices.TryGetValue(key, out var mesh)) return mesh;
+        _freshWood ??= new StandardMaterial3D { AlbedoColor = new Color(.86f, .74f, .52f), Roughness = .95f };
+        return _slices[key] = MeshSlicer.Slice(_variants[variant][0], key.Item2 / 20f, above, _freshWood);
+    }
+
+    /// <summary>What's left standing: the model below the cut, where the tree stood. Still a trunk for bullets and eyes.</summary>
+    private Node3D Stump(Transform3D treeXf, int variant, float cut)
+    {
+        float s = treeXf.Basis.X.Length(), hs = treeXf.Basis.Y.Length();
+        var stump = new MeshInstance3D { Mesh = Sliced(variant, (cut + .3f * s) / hs, above: false) };
+        AddChild(stump);
+        stump.GlobalTransform = treeXf;
+        var foot = treeXf.Origin + Vector3.Up * .3f * s;
+        stump.SetMeta("foliage", Foliage.Add(new[] { new Foliage.Plant(foot.X, foot.Z, foot.Y, Math.Max(.32f * s, .06f), cut, 0, 0, 0, 0) }));
+        return stump;
     }
 
     /// <summary>A small random shift in brightness and hue (yellower or bluer greens), darkened by the layer's shade.</summary>

@@ -71,6 +71,9 @@ public partial class Guard : CharacterBody3D, IDamageable
         ["hurt"] = new[] { "Ow!", "Rude!", "That's going in my report!", "Ow! My lunch!" },
         ["dead"] = new[] { "...told them I needed a vacation.", "...tell my mother... I was right..." },
         ["won"] = new[] { "And STAY down.", "That's what you get. Ugh, more paperwork." },
+        ["tree"] = new[] { "Did a tree just... fall over? By itself?", "TIMBER! ...wait. Who said that?", "The jungle is falling apart. Like my career.",
+                           "Trees don't just DO that." },
+        ["squashed"] = new[] { "...a TREE? Seriously?", "...killed by... forestry..." },
     };
 
     public override void _Ready()
@@ -277,6 +280,14 @@ public partial class Guard : CharacterBody3D, IDamageable
                 Enter(Mood.Investigate, "gunfire");
             }
         }
+        else if (source is TreeScatter)
+        {
+            // A tree crashing down nearby: very suspicious, but no idea who did it.
+            if (State is Mood.Alert) return;
+            _lastKnown = at;
+            Suspicion = Math.Max(Suspicion, .75f);
+            Enter(Mood.Investigate, "tree");
+        }
         else if (State is Mood.Patrol or Mood.Suspicious)
         {
             _lastKnown = at;
@@ -291,7 +302,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         bool headshot = at.Y - GlobalPosition.Y > 1.45f;
         Health -= headshot ? damage * 3 : damage;
         GD.Print($"[guard] hit for {(headshot ? damage * 3 : damage):0}{(headshot ? " (headshot)" : "")}, health {Math.Max(Health, 0):0}");
-        if (Health <= 0) { Die(); return; }
+        if (Health <= 0) { Die(squashed: damage >= 60); return; } // only falling trees hit that hard
         _lastKnown = from;          // he felt where that came from
         EnterAlert();
         Bark("hurt");
@@ -310,9 +321,9 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (State is Mood.Alert or Mood.Investigate) { StartSearch(); _searchLeft = 10; }
     }
 
-    private void Die()
+    private void Die(bool squashed = false)
     {
-        Enter(Mood.Dead, "dead");
+        Enter(Mood.Dead, squashed ? "squashed" : "dead");
         _deathTime = 0;
         _icon.Visible = false;
         GetChild<CollisionShape3D>(0).Disabled = true;
@@ -338,6 +349,14 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (Target.Running) chance *= .5f;
         else if (Target.Velocity.LengthSquared() > .5f) chance *= .75f;
         if (Target.Crouching) chance *= .8f;
+        // A trunk between us takes the bullet, hit or miss: hiding behind a tree works.
+        if (Foliage.RaycastTrunk(eye, Target.Chest) is { } wood)
+        {
+            var shotDir = (Target.Chest - eye).Normalized();
+            Effects.Splinters(this, wood.Point, wood.Normal, shotDir);
+            Foliage.ReportHit(wood.Plant, wood.Point, shotDir, 30);
+            return;
+        }
         if (_rng.Randf() < chance)
         {
             Target.TakeHit(_rng.RandfRange(11, 18), Target.Chest, eye);
@@ -349,7 +368,9 @@ public partial class Guard : CharacterBody3D, IDamageable
         var q = PhysicsRayQueryParameters3D.Create(eye, eye + dir * (dist + 30));
         q.Exclude = new Godot.Collections.Array<Rid> { GetRid(), Target.GetRid() };
         var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
-        if (hit.Count > 0) Effects.Impact(this, (Vector3)hit["position"], (Vector3)hit["normal"]);
+        var end = hit.Count > 0 ? (Vector3)hit["position"] : eye + dir * (dist + 30);
+        if (Foliage.RaycastTrunk(eye, end) is { } tree) { Effects.Splinters(this, tree.Point, tree.Normal, dir); Foliage.ReportHit(tree.Plant, tree.Point, dir, 30); }
+        else if (hit.Count > 0) Effects.Impact(this, (Vector3)hit["position"], (Vector3)hit["normal"]);
     }
 
     // ================================================================= movement and body
