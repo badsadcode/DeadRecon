@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using DeadRecon.Combat;
 using Godot;
 
 namespace DeadRecon.Player;
@@ -7,8 +8,8 @@ namespace DeadRecon.Player;
 /// <summary>
 /// First-person test rifle built from a BadGun .glb. Uses the gun's own metadata (glTF extras "badgun"):
 /// SOCKET_ADS (eye position when aiming), SOCKET_Muzzle, and parts with "motion" (Trigger, Magazine, ChargingHandle).
-/// LMB fire (full auto), RMB aim, R reload. Sounds are synthesised here until real audio exists.
-/// Bullets are hitscan for now; only terrain has collision, so trees don't stop them yet.
+/// LMB fire (full auto), RMB aim, R reload. Placeholder effects and sounds come from Combat.Effects.
+/// Bullets are hitscan; terrain and characters have collision, trees don't (yet), so trees don't stop bullets.
 /// </summary>
 public partial class Weapon : Node3D
 {
@@ -18,6 +19,7 @@ public partial class Weapon : Node3D
     // Test-gun numbers (BadGun doesn't ship ballistics; these are ours).
     private const float RoundsPerMinute = 600, Range = 900, HipSpread = .018f, AimSpread = .0015f;
     private const int MagazineSize = 20;
+    private const float Damage = 34; // three to the body; the guard triples it for headshots
     private const float RaiseFov = 40, ScopeFov = 11, HipFov = 70, AimSpeed = 7;  // ScopeFov 11 = roughly 6x
     private static readonly Vector3 HipOffset = new(.16f, -.21f, -.36f); // where the grip sits relative to the eye
 
@@ -39,7 +41,6 @@ public partial class Weapon : Node3D
     private AudioStreamPlayer _shot = null!, _click = null!, _clack = null!;
     private ColorRect _scope = null!;
     private ShaderMaterial _scopeMaterial = null!;
-    private readonly Queue<Node3D> _holes = new();
     private readonly RandomNumberGenerator _rng = new();
 
     public override void _Ready()
@@ -64,7 +65,7 @@ public partial class Weapon : Node3D
         else _adsInModel = new Vector3(0, .1f, -.2f);
 
         _flashLight = new OmniLight3D { LightColor = new Color(1, .75f, .4f), LightEnergy = 0, OmniRange = 6, ShadowEnabled = false };
-        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.28f, .28f) }, MaterialOverride = FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.28f, .28f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
         (_muzzle ?? _model).AddChild(_flashLight);
         (_muzzle ?? _model).AddChild(_flashSprite);
 
@@ -76,9 +77,9 @@ public partial class Weapon : Node3D
         layer.AddChild(_scope);
         AddChild(layer);
 
-        _shot = Player(Gunshot(), -2);
-        _click = Player(Click(1800, .03f), -8);
-        _clack = Player(Click(700, .07f), -6);
+        _shot = Player(Effects.Gunshot(), -2);
+        _click = Player(Effects.Click(1800, .03f), -8);
+        _clack = Player(Effects.Click(700, .07f), -6);
         Loaded = true;
     }
 
@@ -131,6 +132,7 @@ public partial class Weapon : Node3D
 
     private void Fire()
     {
+        if (Walker.Dead) return;
         if (Ammo <= 0) { _click.Play(); _cooldown = .25f; return; }
         Ammo--;
         _cooldown = 60f / RoundsPerMinute;
@@ -146,7 +148,11 @@ public partial class Weapon : Node3D
         var query = PhysicsRayQueryParameters3D.Create(cam.Origin, cam.Origin + dir * Range);
         query.Exclude = new Godot.Collections.Array<Rid> { Walker.GetRid() };
         var hit = GetWorld3D().DirectSpaceState.IntersectRay(query);
-        if (hit.Count > 0) Impact((Vector3)hit["position"], (Vector3)hit["normal"]);
+        Hearing.Make(cam.Origin, Hearing.Gunshot, Walker);
+        if (hit.Count == 0) return;
+        var at = (Vector3)hit["position"];
+        if (hit["collider"].AsGodotObject() is IDamageable target) target.TakeHit(Damage, at, cam.Origin);
+        else Effects.Impact(this, at, (Vector3)hit["normal"]);
     }
 
     private void UpdateReload(float dt)
@@ -161,38 +167,6 @@ public partial class Weapon : Node3D
         if (_reload >= 1.25f && _reload - dt < 1.25f) _clack.Play();
         if (_reload >= 1.5f && _reload - dt < 1.5f) _click.Play();
         if (_reload >= 1.75f) { _reload = -1; Ammo = MagazineSize; }
-    }
-
-    private void Impact(Vector3 at, Vector3 normal)
-    {
-        var hole = new MeshInstance3D
-        {
-            Mesh = new CylinderMesh { TopRadius = .03f, BottomRadius = .03f, Height = .004f, RadialSegments = 8, Rings = 0 },
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(.06f, .05f, .04f), Roughness = 1 },
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        };
-        GetTree().CurrentScene.AddChild(hole);
-        var up = normal.Normalized();
-        var side = Math.Abs(up.Y) < .9f ? up.Cross(Vector3.Up).Normalized() : up.Cross(Vector3.Right).Normalized();
-        hole.GlobalTransform = new Transform3D(new Basis(side, up, side.Cross(up)), at + up * .003f);
-        _holes.Enqueue(hole);
-        if (_holes.Count > 80) _holes.Dequeue().QueueFree();
-
-        var dust = new CpuParticles3D
-        {
-            Emitting = true, OneShot = true, Amount = 14, Lifetime = .9f, Explosiveness = .95f,
-            Direction = Vector3.Up, Spread = 35, InitialVelocityMin = 1.2f, InitialVelocityMax = 3f, Gravity = new Vector3(0, -3, 0),
-            ScaleAmountMin = .5f, ScaleAmountMax = 1.2f,
-            Mesh = new QuadMesh { Size = new Vector2(.09f, .09f) },
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = new Color(.38f, .30f, .20f, .8f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles, ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            },
-        };
-        GetTree().CurrentScene.AddChild(dust);
-        dust.GlobalTransform = new Transform3D(new Basis(side, up, side.Cross(up)), at);
-        GetTree().CreateTimer(1.5).Timeout += dust.QueueFree;
     }
 
     // ---------------------------------------------------------------- helpers
@@ -231,70 +205,5 @@ public partial class Weapon : Node3D
         var p = new AudioStreamPlayer { Stream = stream, VolumeDb = db, MaxPolyphony = 4 };
         AddChild(p);
         return p;
-    }
-
-    private static StandardMaterial3D FlashMaterial()
-    {
-        const int N = 64;
-        var px = new byte[N * N * 4];
-        for (int y = 0; y < N; y++)
-        for (int x = 0; x < N; x++)
-        {
-            float dx = (x + .5f) / N * 2 - 1, dy = (y + .5f) / N * 2 - 1;
-            float r = MathF.Sqrt(dx * dx + dy * dy), ang = MathF.Atan2(dy, dx);
-            float star = MathF.Pow(MathF.Abs(MathF.Cos(ang * 2.5f)), 6) * .6f + .4f; // five-ish prongs
-            float a = Math.Clamp(1 - r / star, 0, 1);
-            a = a * a;
-            int o = (y * N + x) * 4;
-            px[o] = 255; px[o + 1] = (byte)(200 * a + 55); px[o + 2] = (byte)(120 * a); px[o + 3] = (byte)(255 * a);
-        }
-        var tex = ImageTexture.CreateFromImage(Image.CreateFromData(N, N, false, Image.Format.Rgba8, px));
-        return new StandardMaterial3D
-        {
-            AlbedoTexture = tex, Transparency = BaseMaterial3D.TransparencyEnum.Alpha, BlendMode = BaseMaterial3D.BlendModeEnum.Add,
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, BillboardMode = BaseMaterial3D.BillboardModeEnum.Enabled,
-            NoDepthTest = false, AlbedoColor = new Color(1, 1, 1, 1),
-        };
-    }
-
-    // ---------------------------------------------------------------- synthesised placeholder sounds
-
-    private static AudioStreamWav Gunshot()
-    {
-        const int Rate = 44100;
-        int n = (int)(Rate * .55f);
-        var data = new byte[n * 2];
-        var rng = new Random(97232);
-        float low = 0, lp = 0;
-        for (int i = 0; i < n; i++)
-        {
-            float t = i / (float)Rate;
-            float noise = (float)rng.NextDouble() * 2 - 1;
-            lp += (noise - lp) * .35f;                                 // crack: bright noise, very short
-            low += (noise - low) * .02f;                               // boom/rumble: dark noise, longer tail
-            float crack = lp * MathF.Exp(-t * 55);
-            float thump = MathF.Sin(MathF.Tau * (55 + 40 * MathF.Exp(-t * 30)) * t) * MathF.Exp(-t * 14);
-            float tail = low * 6 * MathF.Exp(-t * 6);
-            float s = Math.Clamp((crack * 1.2f + thump * .8f + tail * .7f) * (t < .002f ? t / .002f : 1), -1, 1);
-            short v = (short)(s * 30000);
-            data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
-        }
-        return new AudioStreamWav { Format = AudioStreamWav.FormatEnum.Format16Bits, MixRate = Rate, Stereo = false, Data = data };
-    }
-
-    private static AudioStreamWav Click(float pitch, float length)
-    {
-        const int Rate = 44100;
-        int n = (int)(Rate * length);
-        var data = new byte[n * 2];
-        var rng = new Random(7);
-        for (int i = 0; i < n; i++)
-        {
-            float t = i / (float)Rate;
-            float s = (MathF.Sin(MathF.Tau * pitch * t) * .6f + ((float)rng.NextDouble() * 2 - 1) * .4f) * MathF.Exp(-t * 90);
-            short v = (short)(Math.Clamp(s, -1, 1) * 22000);
-            data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
-        }
-        return new AudioStreamWav { Format = AudioStreamWav.FormatEnum.Format16Bits, MixRate = Rate, Stereo = false, Data = data };
     }
 }
