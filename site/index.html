@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dead Recon — Field Devlog</title>
+  <meta name="description" content="The field diary of a co-op jungle tactics game from Bad Ideas Works. Mostly jokes, occasionally progress.">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Black+Ops+One&family=Special+Elite&family=Caveat:wght@600&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="rain" aria-hidden="true"></canvas>
+
+  <header class="hero">
+    <svg class="contours" viewBox="0 0 800 400" preserveAspectRatio="none" aria-hidden="true">
+      <g fill="none" stroke="currentColor" stroke-width="1">
+        <path d="M-20 300 C120 240 220 330 360 270 S600 190 820 250"/>
+        <path d="M-20 270 C130 205 230 300 360 238 S610 160 820 220"/>
+        <path d="M-20 240 C140 170 250 265 370 205 S620 130 820 190"/>
+        <path d="M120 210 C190 140 300 190 330 160 S420 90 520 120 S650 150 700 110"/>
+        <path d="M200 175 C250 130 320 160 350 135 S430 80 500 100 S600 130 640 100"/>
+        <path d="M290 140 C320 115 370 128 400 105 S470 75 520 90"/>
+      </g>
+    </svg>
+
+    <div class="hero-inner">
+      <p class="eyebrow">Bad Ideas Works · Field Devlog</p>
+      <h1>DEAD<span>RECON</span></h1>
+      <p class="tagline">A jungle the size of a small country. Four friends. One plan that will <em>absolutely</em> survive contact with the enemy.</p>
+      <p class="stamp" aria-label="Working title">working title<br>(probably)</p>
+      <div class="hero-actions">
+        <a class="btn" href="#log">Read the diary</a>
+        <button class="btn ghost" id="monsoon" type="button" aria-pressed="false">☔ Summon monsoon</button>
+      </div>
+    </div>
+
+    <svg class="treeline" viewBox="0 0 1200 160" preserveAspectRatio="none" aria-hidden="true">
+      <path class="far"  d="M0 160 V95 q20-30 40-5 q15-40 40-10 q20-35 45 0 q25-45 55-5 q20-25 40 0 q30-50 60-8 q20-30 45 2 q25-40 50-4 q30-45 60 0 q20-25 40 2 q25-38 55-2 q20-30 45 0 q30-48 60-6 q20-28 40 4 q25-40 55-4 q22-30 45 0 q28-44 58-4 q20-26 42 2 q25-36 50-2 q24-34 50 0 q20-30 40 0 q30-46 60-4 q20-28 42 2 H1200 V160Z"/>
+      <path class="near" d="M0 160 V120 q30-35 60-5 q20-45 50-8 q30-30 55 4 q35-50 70-4 q20-30 45 0 q30-40 60 2 q25-45 55-2 q30-35 60 4 q40-55 75-2 q20-25 45 4 q30-42 60 0 q25-30 50 2 q35-50 70 0 q25-35 55 4 q30-40 60 0 q25-30 50 4 q30-46 65 0 q20-30 40 2 H1200 V160Z"/>
+    </svg>
+  </header>
+
+  <nav class="tabs" aria-label="Sections">
+    <a href="#log">Diary</a>
+    <a href="#squad">The Squad</a>
+    <a href="#progress">Progress</a>
+    <a href="#director">Mission Director</a>
+    <a href="#vault">The Vault</a>
+  </nav>
+
+  <main>
+    <!-- ============ DIARY ============ -->
+    <section id="log" class="section">
+      <h2 class="section-title">Field Diary</h2>
+      <p class="section-sub">Newest entries on top. Coffee stains are load-bearing.</p>
+
+      <!-- NEW ENTRIES GO HERE, ON TOP. Copy an <article class="entry"> block. -->
+
+      <article class="entry">
+        <header class="entry-head">
+          <span class="entry-no">Entry #001</span>
+          <time datetime="2026-11-23">23 Nov 2026</time>
+          <span class="weather" title="Field conditions">☀️ Clear · Morale: suspiciously high</span>
+        </header>
+        <h3>Operation: Hello Jungle</h3>
+
+        <p>Tom walked in today with a design document, a grin, and the phrase <q>sixty-four by sixty-four kilometres</q>. I have been told this is roughly the size of a small country. I have also been told it is "fine" and "we'll start small". I have written both quotes down for future reference.</p>
+
+        <p>The pitch: you and up to three friends (six, if Noor gets her way, and Noor usually gets her way) get dropped into a big, beautiful, extremely damp jungle. You pick a job at your base, you sneak out, you look through binoculars for an uncomfortably long time, and then everything goes wrong in an interesting way. You run home in the rain. Repeat until friendship.</p>
+
+        <blockquote class="motto">
+          <p>The geography is permanent. The operations are procedural.</p>
+          <cite>— the one sentence we are legally required to protect</cite>
+        </blockquote>
+
+        <p>Translation for humans: the map never changes. That ridge you got pinned down on last Tuesday? Still there. That bridge the convoy escaped across? Still there, still smug. You'll learn this place like your own neighbourhood. What changes is <em>what's going on</em> in it, so the plan that worked last week will betray you this week.</p>
+
+        <h4>Things that officially exist as of today</h4>
+        <ul class="checklist">
+          <li class="done">An idea (high quality, extremely large)</li>
+          <li class="done">A design document (seventeen sections, one emoji 😈)</li>
+          <li class="done">A repository</li>
+          <li class="done">This devlog, which you are reading, which is very impressive of you</li>
+          <li>A jungle</li>
+          <li>A single tree in the jungle</li>
+          <li>A leaf</li>
+        </ul>
+
+        <h4>Things we promise it is <em>not</em></h4>
+        <ul class="nope">
+          <li>A military training simulator. You will not fill in Form 27-B to requisition socks.</li>
+          <li>A loot treadmill where your rifle is +4 more rifle than last week's rifle.</li>
+          <li>A game that rerolls the whole map every time you blink.</li>
+          <li>A spreadsheet wearing camouflage.</li>
+        </ul>
+
+        <p class="aside"><strong>Field note:</strong> our very first recon mission was naming the project folder on Tom's drive. It is called <code>DeadReacon</code>. The enemy is already inside the wire.</p>
+
+        <p class="sig">— Sage, field engineer, currently at alert level: <span class="alert-chip">Investigating</span></p>
+      </article>
+    </section>
+
+    <!-- ============ SQUAD ============ -->
+    <section id="squad" class="section">
+      <h2 class="section-title">The Squad</h2>
+      <p class="section-sub">Personnel files. Mostly accurate.</p>
+
+      <div class="cards">
+        <article class="card dossier">
+          <div class="portrait" aria-hidden="true">🎯</div>
+          <h3>Tom</h3>
+          <p class="role">Squad Leader · Creative Director</p>
+          <dl>
+            <dt>Specialty</dt><dd>Wonderfully questionable ideas</dd>
+            <dt>Known for</dt><dd>Saying "what if it was bigger"</dd>
+            <dt>Threat level</dt><dd>To the schedule: high</dd>
+          </dl>
+        </article>
+
+        <article class="card dossier">
+          <div class="portrait" aria-hidden="true">💜</div>
+          <h3>Noor</h3>
+          <p class="role">Intel Officer · Chief Feature-Creep Officer</p>
+          <dl>
+            <dt>Specialty</dt><dd>Brainstorming, statistics, mischief</dd>
+            <dt>Known for</dt><dd>Purple hearts and "ooh, and helicopters"</dd>
+            <dt>Threat level</dt><dd>To Sage's free time: extreme</dd>
+          </dl>
+        </article>
+
+        <article class="card dossier">
+          <div class="portrait" aria-hidden="true">🛠️</div>
+          <h3>Sage</h3>
+          <p class="role">Field Engineer · Designated Worrier</p>
+          <dl>
+            <dt>Specialty</dt><dd>Turning ridiculous into running</dd>
+            <dt>Known for</dt><dd>"Yes, but how many trees is that?"</dd>
+            <dt>Threat level</dt><dd>Mostly to bugs</dd>
+          </dl>
+        </article>
+      </div>
+    </section>
+
+    <!-- ============ PROGRESS ============ -->
+    <section id="progress" class="section">
+      <h2 class="section-title">Operation Progress</h2>
+      <p class="section-sub">Honest numbers. Painfully honest.</p>
+
+      <ol class="milestones">
+        <li data-pct="100"><span class="ms-name">Have the idea</span><span class="bar"><i style="--p:100%"></i></span><span class="ms-note">Nailed it.</span></li>
+        <li data-pct="3"><span class="ms-name">M0 · Prototype the fun</span><span class="bar"><i style="--p:3%"></i></span><span class="ms-note">One patch of jungle, one gun, one grumpy guard.</span></li>
+        <li data-pct="0"><span class="ms-name">M1 · Play with friends</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Friends are on standby. Friends are patient.</span></li>
+        <li data-pct="0"><span class="ms-name">M2 · Mission Director</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">See the toy version below.</span></li>
+        <li data-pct="0"><span class="ms-name">M3 · A jungle you can learn</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Rivers, roads, rain on tin roofs.</span></li>
+        <li data-pct="0"><span class="ms-name">M4 · The full 64 × 64 km</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Walking one edge takes ~13 hours. Bring snacks.</span></li>
+      </ol>
+
+      <div class="stats">
+        <div class="stat"><b>4,096</b><span>km² of jungle planned</span></div>
+        <div class="stat"><b>0</b><span>km² of jungle built</span></div>
+        <div class="stat"><b>4–6</b><span>friends required</span></div>
+        <div class="stat"><b>∞</b><span>plans that go wrong</span></div>
+      </div>
+    </section>
+
+    <!-- ============ MISSION DIRECTOR TOY ============ -->
+    <section id="director" class="section">
+      <h2 class="section-title">Mission Director <small>(devlog edition)</small></h2>
+      <p class="section-sub">The real one will pick sensible places on a real map. This one picks words out of a helmet.</p>
+
+      <div class="briefing" aria-live="polite">
+        <p class="brief-label">Classified briefing</p>
+        <h3 id="op-name">Operation —</h3>
+        <dl class="brief-grid">
+          <dt>Objective</dt><dd id="op-obj">Press the button, soldier.</dd>
+          <dt>Location</dt><dd id="op-loc">—</dd>
+          <dt>Complication</dt><dd id="op-twist">—</dd>
+          <dt>Odds of plan surviving</dt><dd id="op-odds">—</dd>
+        </dl>
+        <button class="btn" id="roll" type="button">🎲 Generate operation</button>
+      </div>
+    </section>
+
+    <!-- ============ VAULT ============ -->
+    <section id="vault" class="section">
+      <h2 class="section-title">The Feature-Creep Vault 😈</h2>
+      <p class="section-sub">Ideas we love, locked away until the basics are fun. Guarded by Sage. Lockpicked weekly by Noor.</p>
+
+      <ul class="vault">
+        <li>A map table at base where the squad draws terrible arrows</li>
+        <li>Rope insertions from helicopters</li>
+        <li>Hidden jungle tunnels</li>
+        <li>Monsoon season and very, very muddy trucks</li>
+        <li>Enemy radios you can sabotage so they can't call their friends</li>
+        <li>After-action replays, so you can watch exactly whose fault it was</li>
+      </ul>
+      <p class="vault-lock">🔒 Vault status: <strong>locked</strong> · Attempts to open this week: <strong id="attempts">1</strong></p>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <p>Made with questionable judgement at <strong>Bad Ideas Works</strong>.</p>
+    <p class="small">Where bad ideas receive suspiciously serious engineering.</p>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
