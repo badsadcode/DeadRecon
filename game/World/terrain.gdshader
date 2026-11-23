@@ -8,6 +8,7 @@ uniform float texture_mix : hint_range(0.0, 1.0) = 1.0;
 uniform float wetness : hint_range(0.0, 1.0) = 0.0;  // Weather: soaked ground is darker and shinier, with puddles
 uniform float tile_metres = 2.6;   // one repeat of a ground texture
 uniform float rock_metres = 5.0;
+uniform float bump_strength = 0.03;  // metres of relief read from the textures' light/dark detail (fades with distance)
 
 uniform sampler2D loam_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
 uniform sampler2D litter_tex : source_color, filter_linear_mipmap_anisotropic, repeat_enable;
@@ -86,18 +87,42 @@ void fragment() {
 	t *= mix(0.8, 1.1, broad);                      // big-scale variation so distant ground isn't uniform
 	t *= 0.85;                                      // photos are brighter than a shaded jungle floor
 
+	// Hue drift: slow patches of warmer/redder and greener/yellower ground, so the floor isn't one carpet.
+	float hue_a = noise(p * 0.017 + 91.0), hue_b = noise(p * 0.061 + 13.0);
+	vec3 warm = t * vec3(1.12, 0.96, 0.82), green = t * vec3(0.9, 1.08, 0.86), yellow = t * vec3(1.06, 1.04, 0.8);
+	t = mix(t, warm, smoothstep(0.55, 0.85, hue_a) * 0.7);
+	t = mix(t, green, smoothstep(0.55, 0.85, 1.0 - hue_a) * 0.6 * flatness);
+	t = mix(t, yellow, smoothstep(0.6, 0.9, hue_b) * 0.4);
+
+	// Loft: the textures' own brightness as height. Dark gaps between leaves and stones sink in (darker, occluded)
+	// and the surface normal tilts with the detail so low sun picks it out.
+	// Height from a softened sample (a blurrier mip level): the shapes of leaves and clods, not pixel grain,
+	// so the relief doesn't glitter.
+	vec3 soft = mix(texture(loam_tex, uv, 2.5).rgb, texture(litter_tex, uv * 0.9 + 0.5, 2.5).rgb, smoothstep(0.35, 0.7, broad));
+	soft = mix(soft, triplanar(rock_tex, world_pos / rock_metres, world_normal), rock_w);
+	float h = smoothstep(0.02, 0.26, dot(soft, vec3(0.3, 0.55, 0.15)));
+	float bump_near = 1.0 - smoothstep(25.0, 90.0, dist);
+	t *= mix(1.0, mix(0.62, 1.08, h), 0.85 * bump_near * texture_mix);
+	float bh = h * bump_strength * bump_near * texture_mix;
+	vec3 dpdx = dFdx(VERTEX), dpdy = dFdy(VERTEX);
+	float dhx = dFdx(bh), dhy = dFdy(bh);
+	vec3 r1 = cross(dpdy, NORMAL), r2 = cross(NORMAL, dpdx);
+	float det = dot(dpdx, r1);
+	vec3 grad = sign(det) * (dhx * r1 + dhy * r2);
+	NORMAL = normalize(abs(det) * NORMAL - grad);
+
 	vec3 albedo = mix(painted, t, texture_mix);
-	float rough = mix(0.93, 0.85 - 0.3 * wet_w, texture_mix);
+	float rough = mix(0.95, 0.93 - 0.15 * wet_w, texture_mix);  // dry jungle floor is matte
 
 	// Wet: darker (water fills the pores), glossier; puddles collect in flat spots, patchy.
 	float puddle = smoothstep(0.62, 0.72, noise(p * 0.09 + 31.0) * 0.7 + noise(p * 0.5) * 0.3) * smoothstep(0.93, 0.99, world_normal.y);
 	puddle *= smoothstep(0.35, 0.9, wetness) * (1.0 - rock_w);
-	albedo *= mix(1.0, 0.62, wetness * (1.0 - rock_w * 0.4));
-	rough = mix(rough, 0.35, wetness);
+	albedo *= mix(1.0, 0.66, wetness * (1.0 - rock_w * 0.4));
+	rough = mix(rough, 0.62, wetness * (0.6 + 0.4 * h));    // wet: a soft sheen, strongest on the raised bits
 	albedo = mix(albedo, albedo * 0.45 + vec3(0.02, 0.025, 0.02), puddle);
-	rough = mix(rough, 0.04, puddle);
+	rough = mix(rough, 0.06, puddle);
 
 	ALBEDO = albedo;
 	ROUGHNESS = rough;
-	SPECULAR = mix(0.25, 0.5, max(wetness * 0.5, puddle));
+	SPECULAR = mix(0.08, 0.5, puddle) + 0.1 * wetness * (1.0 - puddle);
 }
