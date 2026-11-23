@@ -12,8 +12,8 @@ namespace DeadRecon.AI;
 /// last known position and gives up. No magic tracking: he only knows where you are while he can see you, or roughly
 /// where a noise came from.
 /// <para>Senses: sight (view cone, range, line of sight through terrain; crouching, standing still and distance help
-/// you, running hurts) and hearing (<see cref="Hearing"/>: gunshots far, footsteps close). Trees don't block his view
-/// yet (they have no collision); the shorter jungle view range stands in for foliage.</para>
+/// you, running hurts) and hearing (<see cref="Hearing"/>: gunshots far, footsteps close). Seeing through plants is
+/// limited by <see cref="Foliage"/>: trunks block, leaves let some through (<see cref="Exposure"/>).</para>
 /// <para>Placeholder body built from primitives, holding the BadGun rifle.</para>
 /// </summary>
 public partial class Guard : CharacterBody3D, IDamageable
@@ -31,11 +31,14 @@ public partial class Guard : CharacterBody3D, IDamageable
     public float Suspicion { get; private set; }
     public float Health { get; private set; } = 100;
     public bool CanSeeTarget => _seen;
+    /// <summary>0..1 how much of the player he can see right now (0 outside his view, behind terrain or trunks).</summary>
+    public float Exposure { get; private set; }
 
     // ---- tuning
     private const float WalkSpeed = 1.5f, InvestigateSpeed = 2.0f, RunSpeed = 4.3f, Gravity = 9.81f, EyeHeight = 1.6f;
     private const float ViewRange = 55, AlertViewRange = 85, ViewCos = .5f, AlertViewCos = -.2f; // 120 deg cone, wider when alert
     private const float SearchTime = 18, ReactionTime = .7f;
+    private const float MinExposure = .12f; // below this the player is hidden by plants
 
     private Node3D _rig = null!, _head = null!, _legL = null!, _legR = null!, _gunPivot = null!;
     private Node3D? _muzzle;
@@ -126,10 +129,21 @@ public partial class Guard : CharacterBody3D, IDamageable
         float range = alert ? AlertViewRange : ViewRange;
         var forward = -GlobalTransform.Basis.Z;
         float cos = forward.Dot(to / Math.Max(dist, .01f));
-        if (dist < range && (cos > (alert ? AlertViewCos : ViewCos) || dist < 3.5f) && LineOfSight(eye, Target.Chest))
+        // How much of the player he could see: terrain must not be in the way, plants let some through.
+        // Chest or head, whichever shows more (a head over the ferns is a smaller target).
+        Exposure = 0;
+        if (dist < range && (cos > (alert ? AlertViewCos : ViewCos) || dist < 3.5f))
+        {
+            var head = Target.Camera.GlobalPosition;
+            float chest = LineOfSight(eye, Target.Chest) ? Foliage.Transmission(eye, Target.Chest) : 0;
+            float top = LineOfSight(eye, head) ? Foliage.Transmission(eye, head) * .7f : 0;
+            Exposure = Math.Max(chest, top);
+            if (dist < 3.5f && Exposure > 0) Exposure = Math.Max(Exposure, .4f); // that close, he'd notice the rustling
+        }
+        if (Exposure > MinExposure)
         {
             _seen = true;
-            float near = MathF.Pow(1 - dist / range, .7f);
+            float near = MathF.Pow(1 - dist / range, .7f) * Exposure;
             float stance = Target.Crouching ? .45f : 1f;
             float motion = Target.Running ? 1.5f : Target.Velocity.LengthSquared() < .1f ? .55f : 1f;
             float focus = cos > .85f ? 1f : .6f;                         // corner of the eye is less sharp

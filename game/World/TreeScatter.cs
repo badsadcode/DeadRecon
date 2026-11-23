@@ -20,6 +20,7 @@ public partial class TreeScatter : Node3D
     private const int VariantsPerCell = 3;
     private const float MaxSlopeNormalY = .74f;  // no trees on ground steeper than ~42 degrees
     private const float MaxHeight = 1450;
+    private const float TreeHeight = 17; // the NoorForm jungle trees are 16-17.5 m at scale 1
     /// <summary>Distance (m, viewer to cell square) up to which each tree LOD is used; beyond the last, no trees.</summary>
     private static readonly float[] LodUntil = { 35, 140, 380, 2800 };
 
@@ -57,6 +58,7 @@ public partial class TreeScatter : Node3D
         public int Lod = -1;
         public readonly List<Part> Parts = new();
         public int Trees;
+        public int Foliage;   // handle in World.Foliage (sight blocking)
     }
 
     public override void _Ready()
@@ -119,7 +121,7 @@ public partial class TreeScatter : Node3D
 
         var drop = new List<(int, int)>();
         foreach (var (key, cell) in _cells)
-            if (!keep.Contains(key)) { foreach (var part in cell.Parts) part.Node.QueueFree(); drop.Add(key); }
+            if (!keep.Contains(key)) { foreach (var part in cell.Parts) part.Node.QueueFree(); DeadRecon.World.Foliage.Remove(cell.Foliage); drop.Add(key); }
         foreach (var key in drop) _cells.Remove(key);
         TreesShown = shown;
     }
@@ -166,6 +168,7 @@ public partial class TreeScatter : Node3D
     private Cell Plant(int i, int j)
     {
         var cell = new Cell();
+        var blockers = new List<Foliage.Plant>();
         var picks = new int[VariantsPerCell];
         for (int k = 0; k < VariantsPerCell; k++) picks[k] = (int)(Hash((uint)i, (uint)j, 11u + (uint)k) % (uint)_variants.Count);
         float x0 = i * CellSize - World.Half, z0 = j * CellSize - World.Half;
@@ -197,7 +200,12 @@ public partial class TreeScatter : Node3D
                 float yaw = Unit(Hash(ax, az, s + 5)) * MathF.Tau;
                 var basis = new Basis(Vector3.Up, yaw).Scaled(new Vector3(scale, scale * (.9f + .25f * Unit(Hash(ax, az, s + 9))), scale));
                 int k2 = (int)(Hash(ax, az, s + 6) % VariantsPerCell);
-                trees[k2].Add(new Transform3D(basis, new Vector3(x, World.HeightAt(x, z) - .3f * scale, z)));
+                float baseY = World.HeightAt(x, z);
+                trees[k2].Add(new Transform3D(basis, new Vector3(x, baseY - .3f * scale, z)));
+                // For AI sight: trunk up to where the crown starts, crown as a leafy cylinder. Model is ~17 m tall.
+                float height = TreeHeight * scale, trunkR = .32f * scale;
+                blockers.Add(new Foliage.Plant(x, z, baseY, Math.Max(trunkR, .06f), height * .62f,
+                                               height * .55f, height, 3.2f * scale, layer.LodBias > 0 ? .55f : .35f));
                 tints[k2].Add(Tint(Hash(ax, az, s + 10), layer.Shade));
             }
             for (int k = 0; k < VariantsPerCell; k++)
@@ -209,6 +217,7 @@ public partial class TreeScatter : Node3D
                 cell.Trees += trees[k].Count;
             }
         }
+        cell.Foliage = DeadRecon.World.Foliage.Add(blockers);
         return cell;
     }
 

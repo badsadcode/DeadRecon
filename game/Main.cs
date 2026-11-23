@@ -117,6 +117,7 @@ public partial class Main : Node3D
 			$"trees {_trees.TreesShown:N0} ({_trees.VariantCount} kinds)   undergrowth {_cover.PlantsShown:N0}   ground: {(_terrain.TextureMix > .5f ? "textured" : "painted")}\n" +
 			(_weapon.Loaded ? $"rifle {_weapon.Ammo}/20{(_weapon.Reloading ? "  reloading..." : "")}\n" : "") +
 			$"health {_walker.Health:0}   guard: {GuardStatus()}\n" +
+			$"{CoverStatus()}\n" +
 			(_waitingForGround ? "loading ground...\n" : "") +
 			"click: grab mouse   WASD/Shift/Space  Ctrl crouch   LMB fire  RMB aim  R reload   F: fly (Space/C up/down)   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
@@ -175,6 +176,7 @@ public partial class Main : Node3D
 		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.HasCollisionAt(_guard.GlobalPosition) || _trees.Pending > 0); f++) await Frames(1);
 		await Seconds(2); // let him take a few patrol steps
 		GD.Print($"[test] start: guard {GuardStatus()}");
+		MeasureCover();
 		await CloseUp("0_guard");
 
 		// 1. Stand still 28 m in front of him, facing him.
@@ -190,13 +192,24 @@ public partial class Main : Node3D
 		{
 			// Until he has noticed something, keep stepping back into his view (he patrols, so he turns away).
 			double now = Time.GetTicksMsec() / 1000.0;
-			if (_guard.Suspicion < .3f && now - lastMove > 1.5)
+			if (_guard.Suspicion < .3f && now - lastMove > 3)
 			{
+				// The most visible spot 20-30 m in front of him (plants hide many spots now).
 				lastMove = now;
 				var f2 = -_guard.GlobalTransform.Basis.Z; f2.Y = 0; f2 = f2.Normalized();
-				var p2 = _guard.GlobalPosition + f2 * 28;
-				p2.Y = _world.HeightAt(p2.X, p2.Z) + .2f;
-				_walker.GlobalPosition = p2;
+				var eye = _guard.GlobalPosition + Vector3.Up * 1.6f;
+				Vector3 best = Vector3.Zero; float bestT = -1;
+				for (int c = 0; c < 32; c++)
+				{
+					float ang = (c % 8 - 3.5f) * .12f, r = 20 + c / 8 * 3.3f;
+					var along = f2.Rotated(Vector3.Up, ang);
+					var p2 = _guard.GlobalPosition + along * r;
+					p2.Y = _world.HeightAt(p2.X, p2.Z) + .2f;
+					float tr = Foliage.Transmission(eye, p2 + Vector3.Up * 1.3f);
+					if (tr > bestT) { bestT = tr; best = p2; }
+				}
+				_walker.GlobalPosition = best;
+				GD.Print($"[test] standing in the open-ish: plants let {bestT * 100:0}% through, {best.DistanceTo(_guard.GlobalPosition):0} m");
 			}
 			LookAt(_guard.GlobalPosition + Vector3.Up * 1.4f);
 			await Frames(1);
@@ -232,6 +245,47 @@ public partial class Main : Node3D
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
 		GetTree().Quit();
+	}
+
+	/// <summary>
+	/// Test numbers: from random spots near the player, how visible is a standing vs crouching person at several
+	/// distances (plants only, same exposure formula as the guard). Prints a small table.
+	/// </summary>
+	private void MeasureCover()
+	{
+		GD.Print($"[cover] plants registered for sight: {Foliage.Count:N0}");
+		var rng = new RandomNumberGenerator { Seed = 1234 };
+		var centre = _walker.GlobalPosition;
+		foreach (float dist in new[] { 10f, 20f, 30f, 45f })
+		{
+			double standSum = 0, crouchSum = 0; int standHidden = 0, crouchHidden = 0, n = 200;
+			for (int k = 0; k < n; k++)
+			{
+				float a = rng.Randf() * MathF.Tau, b = rng.Randf() * MathF.Tau, r = rng.Randf() * 40;
+				var g = centre + new Vector3(MathF.Cos(a) * r, 0, MathF.Sin(a) * r);
+				var p = g + new Vector3(MathF.Cos(b) * dist, 0, MathF.Sin(b) * dist);
+				g.Y = _world.HeightAt(g.X, g.Z); p.Y = _world.HeightAt(p.X, p.Z);
+				var eye = g + Vector3.Up * 1.6f;
+				float Exp(float chest, float head) => Math.Max(Foliage.Transmission(eye, p + Vector3.Up * chest), Foliage.Transmission(eye, p + Vector3.Up * head) * .7f);
+				float stand = Exp(1.3f, 1.65f), crouch = Exp(.8f, 1.05f);
+				standSum += stand; crouchSum += crouch;
+				if (stand <= .12f) standHidden++;
+				if (crouch <= .12f) crouchHidden++;
+			}
+			GD.Print($"[cover] {dist,2:0} m: standing avg exposure {standSum / n * 100:0}% (fully hidden {standHidden * 100 / n}%), " +
+			         $"crouching avg {crouchSum / n * 100:0}% (fully hidden {crouchHidden * 100 / n}%)");
+		}
+	}
+
+	/// <summary>How hidden the player is from the guard by plants (whether or not he's looking), and what he sees now.</summary>
+	private string CoverStatus()
+	{
+		if (_guard.State == Guard.Mood.Dead) return "cover: nobody left to hide from";
+		var eye = _guard.GlobalPosition + Vector3.Up * 1.6f;
+		if (eye.DistanceTo(_walker.GlobalPosition) > 90) return "cover: out of his sight range";
+		float through = Math.Max(Foliage.Transmission(eye, _walker.Chest), Foliage.Transmission(eye, _walker.Camera.GlobalPosition) * .7f);
+		string sees = _guard.Exposure > 0 ? $"he sees {_guard.Exposure * 100:0}% of you" : "he isn't looking at you";
+		return $"cover from plants: {(1 - through) * 100:0}%   {sees}";
 	}
 
 	private string GuardStatus()

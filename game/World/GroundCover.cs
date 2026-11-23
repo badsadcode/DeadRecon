@@ -25,6 +25,7 @@ public partial class GroundCover : Node3D
 
     private Mesh[] _meshes = Array.Empty<Mesh>();
     private readonly Dictionary<(int, int), Node3D> _cells = new();
+    private readonly Dictionary<Node3D, int> _foliage = new(); // cell -> handle in Foliage (sight blocking)
     private double _sinceUpdate = 1;
 
     public int PlantsShown { get; private set; }
@@ -80,7 +81,7 @@ public partial class GroundCover : Node3D
             foreach (var child in cell.GetChildren()) shown += ((MultiMeshInstance3D)child).Multimesh.InstanceCount;
         }
         var drop = new List<(int, int)>();
-        foreach (var (key, cell) in _cells) if (!keep.Contains(key)) { cell.QueueFree(); drop.Add(key); }
+        foreach (var (key, cell) in _cells) if (!keep.Contains(key)) { Foliage.Remove(_foliage[cell]); _foliage.Remove(cell); cell.QueueFree(); drop.Add(key); }
         foreach (var key in drop) _cells.Remove(key);
         PlantsShown = shown;
     }
@@ -90,6 +91,7 @@ public partial class GroundCover : Node3D
         var cell = new Node3D();
         AddChild(cell);
         float x0 = i * CellSize - World.Half, z0 = j * CellSize - World.Half;
+        var blockers = new List<Foliage.Plant>();
         for (int k = 0; k < Kinds.Length; k++)
         {
             var kind = Kinds[k];
@@ -109,7 +111,12 @@ public partial class GroundCover : Node3D
                 if ((dx * dx + dz * dz) / (4 * World.Spacing * World.Spacing) > 1.2f) continue; // steeper than ~48 degrees
                 float scale = kind.MinScale + (kind.MaxScale - kind.MinScale) * Unit(Hash(ax, az, s + 4));
                 var basis = new Basis(Vector3.Up, Unit(Hash(ax, az, s + 5)) * MathF.Tau).Scaled(new Vector3(scale, scale, scale));
-                xforms.Add(new Transform3D(basis, new Vector3(x, World.HeightAt(x, z) - .05f, z)));
+                float baseY = World.HeightAt(x, z);
+                xforms.Add(new Transform3D(basis, new Vector3(x, baseY - .05f, z)));
+                // For AI sight: ferns hide a crouching body, big fronds hide most of a standing one.
+                blockers.Add(k == 0
+                    ? new Foliage.Plant(x, z, baseY, 0, 0, .05f, .85f * scale, 1.0f * scale, 1.3f)
+                    : new Foliage.Plant(x, z, baseY, 0, 0, .25f, 1.9f * scale, 2.1f * scale, .75f));
                 float bright = .7f + .45f * Unit(Hash(ax, az, s + 6)), warm = Unit(Hash(ax, az, s + 7)) - .5f;
                 tints.Add(new Color(bright * (1 + .25f * warm), bright, bright * (1 - .3f * warm)));
             }
@@ -118,6 +125,7 @@ public partial class GroundCover : Node3D
             for (int t = 0; t < xforms.Count; t++) { mm.SetInstanceTransform(t, xforms[t]); mm.SetInstanceColor(t, tints[t]); }
             cell.AddChild(new MultiMeshInstance3D { Multimesh = mm, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off });
         }
+        _foliage[cell] = Foliage.Add(blockers);
         return cell;
     }
 
