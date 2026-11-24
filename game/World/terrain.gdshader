@@ -109,9 +109,11 @@ void fragment() {
 	float bh = h * bump_strength * bump_near * texture_mix;
 	// Puddles: small, irregular, only where it's quite flat (the slope test is soft so mesh triangles don't show),
 	// and the noise decides the shape. Water is smooth, so no relief inside them.
-	float flat_soft = smoothstep(0.88, 0.985, world_normal.y);
+	// The slope only dims a puddle, gently: any sharp threshold on the (per-vertex) normal traces the mesh
+	// triangles and gives square puddles. The outline comes from the noise alone.
+	float flat_soft = mix(0.35, 1.0, smoothstep(0.7, 0.98, world_normal.y));
 	float pshape = noise(p * 0.21 + 31.0) * 0.6 + noise(p * 0.9 + 7.0) * 0.4;
-	float puddle = smoothstep(0.66, 0.74, pshape) * flat_soft * smoothstep(0.45, 0.95, wetness) * (1.0 - rock_w);
+	float puddle = smoothstep(0.68, 0.75, pshape) * flat_soft * smoothstep(0.45, 0.95, wetness) * smoothstep(0.5, 0.0, rock_w);
 	bh *= 1.0 - puddle;
 	vec3 dpdx = dFdx(VERTEX), dpdy = dFdy(VERTEX);
 	float dhx = dFdx(bh), dhy = dFdy(bh);
@@ -126,8 +128,8 @@ void fragment() {
 	// Wet: darker (water fills the pores), glossier; puddles collect in flat spots, patchy.
 	albedo *= mix(1.0, 0.66, wetness * (1.0 - rock_w * 0.4));
 	rough = mix(rough, 0.62, wetness * (0.6 + 0.4 * h));    // wet: a soft sheen, strongest on the raised bits
-	albedo = mix(albedo, albedo * 0.35 + vec3(0.015, 0.014, 0.01), puddle * 0.9);   // muddy water, not a mirror
-	rough = mix(rough, 0.18, puddle);
+	albedo = mix(albedo, albedo * 0.3 + vec3(0.008, 0.008, 0.006), puddle * 0.9);   // muddy water, not a mirror
+	rough = mix(rough, 0.3, puddle);
 
 	ALBEDO = albedo;
 	ROUGHNESS = rough;
