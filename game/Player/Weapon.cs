@@ -148,6 +148,7 @@ public partial class Weapon : Node3D
         _flash = 0;
         _shot.PitchScale = 1 + _rng.RandfRange(-.06f, .06f);
         _shot.Play();
+        DeadRecon.Audio.Ambience.Current?.Echo(Walker.GlobalPosition);
         Walker.AddRecoil(Mathf.DegToRad(Mathf.Lerp(.9f, .45f, _aim)), Mathf.DegToRad(_rng.RandfRange(-.35f, .35f)));
 
         var cam = Walker.Camera.GlobalTransform;
@@ -224,7 +225,7 @@ public partial class Weapon : Node3D
 
     private AudioStreamPlayer Player(AudioStream stream, float db)
     {
-        var p = new AudioStreamPlayer { Stream = stream, VolumeDb = db, MaxPolyphony = 4 };
+        var p = new AudioStreamPlayer { Stream = stream, VolumeDb = db, MaxPolyphony = 4, Bus = "Effects" };
         AddChild(p);
         return p;
     }

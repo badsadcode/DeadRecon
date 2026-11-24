@@ -65,7 +65,7 @@ public partial class Weather : Node3D
         BuildRain();
         _patter = Loop(RainLoop(heavy: false), -80);
         _roar = Loop(RainLoop(heavy: true), -80);
-        _thunder = new AudioStreamPlayer { Stream = Thunder(), MaxPolyphony = 3 };
+        _thunder = new AudioStreamPlayer { Stream = Thunder(), MaxPolyphony = 3, Bus = "Ambience" };
         AddChild(_thunder);
     }
 
@@ -277,7 +277,7 @@ public partial class Weather : Node3D
 
     private AudioStreamPlayer Loop(AudioStreamWav stream, float db)
     {
-        var p = new AudioStreamPlayer { Stream = stream, VolumeDb = db, Autoplay = true };
+        var p = new AudioStreamPlayer { Stream = stream, VolumeDb = db, Autoplay = true, Bus = "Ambience" };
         AddChild(p);
         return p;
     }

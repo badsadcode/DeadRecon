@@ -505,6 +505,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         _flash = 0;
         _shot.PitchScale = .95f + _rng.Randf() * .1f;
         _shot.Play();
+        DeadRecon.Audio.Ambience.Current?.Echo(GlobalPosition);
 
         var eye = GlobalPosition + Vector3.Up * EyeHeight;
         float dist = eye.DistanceTo(Target.Chest);
@@ -577,6 +578,22 @@ public partial class Guard : CharacterBody3D, IDamageable
     private void Animate(float dt)
     {
         float speed = new Vector2(Velocity.X, Velocity.Z).Length();
+        // Footsteps: one per ~0.75 m walked (shorter strides when running), heard nearby.
+        _stepDistance += speed * dt;
+        if (speed > .3f && _stepDistance > (speed > 3 ? 1.1f : .75f))
+        {
+            _stepDistance = 0;
+            if (_steps != null && Target.GlobalPosition.DistanceTo(GlobalPosition) < 45)
+            {
+                var (gx, gz) = World.ToSample(GlobalPosition.X, GlobalPosition.Z);
+                var surface = World.IsWet((int)gx, (int)gz) ? DeadRecon.Audio.Synth.Surface.Water
+                            : (Weather.Current?.Wetness ?? 0) > .45f ? DeadRecon.Audio.Synth.Surface.Mud : DeadRecon.Audio.Synth.Surface.Leaves;
+                _steps.Stream = DeadRecon.Audio.Synth.Step(surface, (int)(Looks.Randi() % 6));
+                _steps.PitchScale = .85f + .2f * Looks.Randf();
+                _steps.VolumeDb = speed > 3 ? -2 : -7;
+                _steps.Play();
+            }
+        }
         bool crouchWanted = State == Mood.Alert && InCover && !_peeking;
         if (_body != null)
         {
@@ -643,6 +660,11 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (pick == last && lines.Length > 1) pick = (pick + 1) % lines.Length;
         _lastLine[kind] = pick;
         _bubble.Text = lines[pick];
+        if (_voice != null && Target.GlobalPosition.DistanceTo(GlobalPosition) < 80)
+        {
+            _voice.Stream = DeadRecon.Audio.Synth.Voice(lines[pick], _voicePitch, _voiceSeed);
+            _voice.Play();
+        }
         _bubbleLeft = 3.8f;
         GD.Print($"[guard] \"{lines[pick]}\"");
     }
@@ -701,6 +723,9 @@ public partial class Guard : CharacterBody3D, IDamageable
     }
 
     private SoldierBody? _body;
+    private AudioStreamPlayer3D? _voice, _steps;
+    private float _voicePitch = 110, _stepDistance;
+    private int _voiceSeed;
     public SoldierBody? Body => _body;
     private RandomNumberGenerator Looks => _looks ??= new RandomNumberGenerator { Seed = (ulong)(Home.X * 92821 + Home.Z * 68917 + 7) };
     private RandomNumberGenerator? _looks;
@@ -739,7 +764,17 @@ public partial class Guard : CharacterBody3D, IDamageable
     private void FinishBody()
     {
 
-        _shot = new AudioStreamPlayer3D { Stream = Effects.Gunshot(), UnitSize = 12, MaxDistance = 700, VolumeDb = 2, MaxPolyphony = 4 };
+        _shot = new AudioStreamPlayer3D
+        {
+            Stream = Effects.Gunshot(), UnitSize = 12, MaxDistance = 900, VolumeDb = 2, MaxPolyphony = 4, Bus = "Effects",
+            AttenuationFilterCutoffHz = 2500, AttenuationFilterDb = -18,   // far shots sound dull and boomy
+        };
+        _voicePitch = 92 + 40 * Looks.Randf();
+        _voiceSeed = (int)Looks.Randi();
+        _voice = new AudioStreamPlayer3D { UnitSize = 6, MaxDistance = 80, VolumeDb = 1, Bus = "Voices", Position = new Vector3(0, 1.6f, 0) };
+        AddChild(_voice);
+        _steps = new AudioStreamPlayer3D { UnitSize = 3, MaxDistance = 45, Bus = "Effects", MaxPolyphony = 2 };
+        AddChild(_steps);
         AddChild(_shot);
 
         _icon = new Label3D

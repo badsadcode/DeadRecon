@@ -58,6 +58,9 @@ public partial class PauseMenu : CanvasLayer
         Row(box, "Soldier style", style);
         box.AddChild(new Label { Text = "(soldier style applies from the next operation)", Modulate = new Color(1, 1, 1, .5f) });
 
+        Slider(box, "Volume", 0, 1, Settings.MasterVolume, v => { Settings.MasterVolume = v; DeadRecon.Audio.Ambience.ApplyVolumes(); }, v => $"{v * 100:0}%");
+        Slider(box, "Jungle sounds", 0, 1.5f, Settings.AmbienceVolume, v => { Settings.AmbienceVolume = v; DeadRecon.Audio.Ambience.ApplyVolumes(); }, v => $"{v * 100:0}%");
+
         var sens = new HSlider { MinValue = .2, MaxValue = 3, Step = .05, Value = Settings.MouseSensitivity, CustomMinimumSize = new Vector2(220, 0) };
         var sensLabel = new Label { Text = $"{Settings.MouseSensitivity:0.00}x" };
         sens.ValueChanged += v => { Settings.MouseSensitivity = (float)v; sensLabel.Text = $"{v:0.00}x"; Settings.Save(); };
@@ -77,6 +80,17 @@ public partial class PauseMenu : CanvasLayer
             AutowrapMode = TextServer.AutowrapMode.WordSmart, Modulate = new Color(1, 1, 1, .55f),
         };
         box.AddChild(help);
+    }
+
+    private static void Slider(Container parent, string label, float min, float max, float value, Action<float> set, Func<float, string> show)
+    {
+        var slider = new HSlider { MinValue = min, MaxValue = max, Step = .01, Value = value, CustomMinimumSize = new Vector2(220, 0) };
+        var text = new Label { Text = show(value) };
+        slider.ValueChanged += v => { set((float)v); text.Text = show((float)v); Settings.Save(); };
+        var row = new HBoxContainer();
+        row.AddChild(slider);
+        row.AddChild(text);
+        Row(parent, label, row);
     }
 
     private void UpdateNote() => _difficultyNote.Text = Settings.Describe(Settings.Difficulty);

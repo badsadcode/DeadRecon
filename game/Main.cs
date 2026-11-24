@@ -42,6 +42,7 @@ public partial class Main : Node3D
 			args.FirstOrDefault(a => a.StartsWith($"--{name}="))?.Split('=', 2)[1] ?? fallback;
 
 		DeadRecon.UI.Settings.Load();
+		DeadRecon.Audio.Ambience.SetupBuses();
 		_hud = new Label { Position = new Vector2(12, 10) };
 		_hud.AddThemeColorOverride("font_shadow_color", Colors.Black);
 		var layer = new CanvasLayer();
@@ -122,6 +123,13 @@ public partial class Main : Node3D
 
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
+		AddChild(new DeadRecon.Audio.Ambience { Camera = _walker.Camera });
+		_walker.SurfaceAt = p =>
+		{
+			var (gx, gz) = _world.ToSample(p.X, p.Z);
+			if (_world.IsWet((int)gx, (int)gz)) return DeadRecon.Audio.Synth.Surface.Water;
+			return _weather.Wetness > .45f ? DeadRecon.Audio.Synth.Surface.Mud : DeadRecon.Audio.Synth.Surface.Leaves;
+		};
 
 		// Player HUD (the debug text above is F3) and the Esc menu.
 		layer.AddChild(new DeadRecon.UI.Hud { Player = _walker, Rifle = _weapon, Mission = _mission, Weather = _weather });
@@ -140,6 +148,25 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string soundTest = Arg("soundtest", "");
+		if (soundTest != "")
+		{
+			// Export every synthesised sound as a WAV file, then quit.
+			Directory.CreateDirectory(soundTest);
+			void Save(string name, AudioStreamWav w) => w.SaveToWav(Path.Combine(soundTest, name + ".wav"));
+			foreach (var surf in Enum.GetValues<DeadRecon.Audio.Synth.Surface>()) for (int v = 0; v < 3; v++) Save($"step_{surf}_{v}", DeadRecon.Audio.Synth.Step(surf, v));
+			Save("voice_grumble", DeadRecon.Audio.Synth.Voice("Twelve hours. In the rain. Again.", 105, 1));
+			Save("voice_shout", DeadRecon.Audio.Synth.Voice("THERE you are!", 105, 1));
+			Save("voice_high", DeadRecon.Audio.Synth.Voice("Hello? Monkey?", 130, 7));
+			Save("cicadas_loop", DeadRecon.Audio.Synth.Cicadas());
+			Save("jungle_bed_loop", DeadRecon.Audio.Synth.JungleBed());
+			for (int k = 0; k < 4; k++) Save($"bird_{k}", DeadRecon.Audio.Synth.Bird(k, 1));
+			Save("shot_echo", DeadRecon.Audio.Synth.ShotEcho());
+			Save("gunshot", DeadRecon.Combat.Effects.Gunshot());
+			GD.Print($"[sound] saved to {soundTest}");
+			GetTree().Quit();
+			return;
+		}
 		string moveTest = Arg("movetest", "");
 		if (moveTest != "") _ = RunMoveTest(moveTest);
 		string ragTest = Arg("ragdolltest", "");

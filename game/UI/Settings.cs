@@ -14,6 +14,8 @@ public static class Settings
     public static bool ShowDebug { get; set; }
     /// <summary>Which BadCharacters set the guards use: a folder under assets/soldiers (blocky, smooth).</summary>
     public static string SoldierStyle { get; set; } = "blocky";
+    public static float MasterVolume { get; set; } = .8f;
+    public static float AmbienceVolume { get; set; } = 1;
 
     // What difficulty does to the guards.
     /// <summary>How far and how quickly guards notice you.</summary>
@@ -41,6 +43,8 @@ public static class Settings
         InvertY = (bool)cfg.GetValue("input", "invert_y", false);
         ShowDebug = (bool)cfg.GetValue("ui", "debug", false);
         SoldierStyle = (string)cfg.GetValue("game", "soldier_style", "blocky");
+        MasterVolume = Math.Clamp((float)cfg.GetValue("audio", "master", .8f), 0, 1);
+        AmbienceVolume = Math.Clamp((float)cfg.GetValue("audio", "ambience", 1f), 0, 1.5f);
     }
 
     public static void Save()
@@ -51,6 +55,8 @@ public static class Settings
         cfg.SetValue("input", "invert_y", InvertY);
         cfg.SetValue("ui", "debug", ShowDebug);
         cfg.SetValue("game", "soldier_style", SoldierStyle);
+        cfg.SetValue("audio", "master", MasterVolume);
+        cfg.SetValue("audio", "ambience", AmbienceVolume);
         cfg.Save(Path);
     }
 }

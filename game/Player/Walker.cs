@@ -70,6 +70,22 @@ public partial class Walker : CharacterBody3D, IDamageable
     private AudioStreamPlayer? _thud;
     private bool _crouchToggle;
 
+    /// <summary>What's underfoot at a point (set by the scene, which knows the world and the weather).</summary>
+    public Func<Vector3, DeadRecon.Audio.Synth.Surface>? SurfaceAt;
+    private AudioStreamPlayer? _steps;
+    private int _stepVariant;
+
+    private void PlayStep()
+    {
+        if (_steps == null) { _steps = new AudioStreamPlayer { Bus = "Effects", MaxPolyphony = 3 }; AddChild(_steps); }
+        var surface = SurfaceAt?.Invoke(GlobalPosition) ?? DeadRecon.Audio.Synth.Surface.Leaves;
+        _stepVariant = (_stepVariant + 1 + (int)GD.Randi() % 3) % 6;
+        _steps.Stream = DeadRecon.Audio.Synth.Step(surface, _stepVariant);
+        _steps.VolumeDb = Crouching ? -20 : Running ? -6 : -11;
+        _steps.PitchScale = (float)GD.RandRange(.9, 1.1);
+        _steps.Play();
+    }
+
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
         if (Dead || Flying) return;
@@ -250,8 +266,9 @@ public partial class Walker : CharacterBody3D, IDamageable
             _stepNoise -= dt;
             if (_stepNoise <= 0)
             {
-                _stepNoise = Running ? .32f : .5f;
+                _stepNoise = Running ? .32f : Crouching ? .62f : .5f;
                 if (!Crouching) Hearing.Make(GlobalPosition, Running ? Hearing.RunningSteps : Hearing.WalkingSteps, this);
+                PlayStep();
             }
         }
     }

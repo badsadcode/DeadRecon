@@ -12,3 +12,6 @@ obj/
 
 # Tree assets: not committed until re-exported (textures are duplicated per LOD, ~141 MB); consider Git LFS
 assets/
+
+# Sound previews exported by --soundtest
+/tools/sounds/
