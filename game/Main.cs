@@ -124,6 +124,7 @@ public partial class Main : Node3D
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
 		AddChild(new DeadRecon.Audio.Ambience { Camera = _walker.Camera });
+		AddChild(new DeadRecon.Combat.Ballistics());
 		_walker.SurfaceAt = p =>
 		{
 			var (gx, gz) = _world.ToSample(p.X, p.Z);
@@ -360,7 +361,7 @@ public partial class Main : Node3D
 		for (int f = 0; f < 600 && !_terrain.HasCollisionAt(g.GlobalPosition); f++) await Frames(1);
 		await Seconds(1);
 		var chest = g.GlobalPosition + Vector3.Up * 1.0f;   // belly: a stray headshot would kill him and spoil the count
-		foreach (float dist in new[] { 25f, 50f, 80f, 120f })
+		foreach (float dist in new[] { 25f, 50f, 80f, 120f, 200f, 300f })
 		{
 			// Find a spot at this distance with no trunk in the way (fly, at standing eye height above the ground).
 			Vector3 eye = Vector3.Zero; bool found = false;
@@ -396,6 +397,7 @@ public partial class Main : Node3D
 				float hp = g.Health;
 				_weapon.TestReload();
 				_weapon.TestFire();
+				await Seconds(.15 + dist / 700);   // bullets fly now: wait for it to arrive
 				string what = _weapon.LastHit;
 				string key = what.Contains("Character") ? (g.Health < hp ? "target" : "OTHER guard") : what.Split(" at ")[0];
 				log[key] = (log.TryGetValue(key, out var cnt) ? cnt : 0) + 1;
@@ -409,13 +411,23 @@ public partial class Main : Node3D
 				await Seconds(.4);
 				LookAt(chest + Vector3.Up * .3f);
 				await Frames(2);
-				_weapon.TestReload(); _weapon.TestFire();
-				await Seconds(.12);   // the streak is mid-flight
+				_weapon.TestReload();
+				var shooterEye = _walker.Camera.GlobalPosition;
+				_weapon.TestFire();
+				// Watch from the side: 6 m to the right of the line, 20 m along it, looking across.
+				var lineDir = (chest - shooterEye).Normalized();
+				var right = lineDir.Cross(Vector3.Up).Normalized();
+				var watch = shooterEye + lineDir * 22 + right * 7 + Vector3.Up * .5f;
+				_walker.GlobalPosition = watch - Vector3.Up * 1.65f;
+				LookAt(shooterEye + lineDir * 34);
+				_weapon.ForceAim(false); _weapon.Visible = false;
+				await Seconds(.045);   // the comet is mid-flight (~34 m out)
 				await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 				GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, "tracer_80m.png"));
 				await Seconds(.17);   // arriving: the spark
 				await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 				GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, "tracer_80m_impact.png"));
+				_weapon.Visible = true;
 				_weapon.ForceAim(true);
 			}
 			GD.Print($"[range] {dist} m: {hits}/10 hits on the chest; bullets hit: {string.Join(", ", log.Select(kv => $"{kv.Key} x{kv.Value}"))}; sway now {Mathf.RadToDeg(_walker.AimOffset.Length()) * 60:0.0}'");

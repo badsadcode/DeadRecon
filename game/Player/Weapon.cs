@@ -18,7 +18,7 @@ public partial class Weapon : Node3D
     public string ScenePath = "res://assets/weapons/BadGun_rifle_vietnam_97232.glb";
 
     // Test-gun numbers (BadGun doesn't ship ballistics; these are ours).
-    private const float RoundsPerMinute = 600, Range = 900, HipSpread = .018f, AimSpread = .0015f;
+    private const float RoundsPerMinute = 600, Range = 900, HipSpread = .014f, AimSpread = .0006f;   // ~2' scoped: the rifle itself is accurate
     private const int MagazineSize = 20;
     private const float Damage = 34; // three to the body; the guard triples it for headshots
     private const float RaiseFov = 40, ScopeFov = 11, HipFov = 70, AimSpeed = 7;  // ScopeFov 11 = roughly 6x
@@ -39,6 +39,7 @@ public partial class Weapon : Node3D
     public bool HoldingBreath { get; private set; }
     /// <summary>What the last bullet hit (tests).</summary>
     public string LastHit { get; private set; } = "";
+    public Vector3 LastPoint { get; private set; }
 
     private Node3D _model = null!;
     private Node3D? _trigger, _magazine, _charging, _muzzle, _eject;
@@ -180,34 +181,37 @@ public partial class Weapon : Node3D
         Walker.AddRecoil(Mathf.DegToRad(Mathf.Lerp(1.1f, .55f, _aim) * steady), Mathf.DegToRad(_rng.RandfRange(-.4f, .4f) * steady));
         EjectCasing();
         MuzzleSmoke();
-        var query = PhysicsRayQueryParameters3D.Create(cam.Origin, cam.Origin + dir * Range);
-        query.Exclude = new Godot.Collections.Array<Rid> { Walker.GetRid() };
-        var hit = GetWorld3D().DirectSpaceState.IntersectRay(query);
         Hearing.Make(cam.Origin, Hearing.Gunshot, Walker);
-        // Trunks aren't physics objects; ask the foliage registry whether one is closer than whatever the ray hit.
-        var end = hit.Count > 0 ? (Vector3)hit["position"] : cam.Origin + dir * Range;
-        var trunk = DeadRecon.World.Foliage.RaycastTrunk(cam.Origin, end);
-        // Tracer from the muzzle (or just below the eye when scoped: the gun is hidden then) to where it lands.
+        // The sight is zeroed at 100 m: the bore points a hair up so the bullet's drop brings it back onto the
+        // crosshair there. Closer it's a touch high (cm), further it falls: hold over at 200 m and beyond.
+        dir = dir.Rotated(cam.Basis.X, DeadRecon.Combat.Ballistics.ZeroAngle(100));
         var muzzle = Scoped || _muzzle == null ? cam.Origin - cam.Basis.Y * .06f + dir * .4f : _muzzle.GlobalPosition;
-        Effects.Tracer(this, muzzle, trunk?.Point ?? end);
-        if (trunk is { } wood)
+        var origin = cam.Origin;
+        if (DeadRecon.Combat.Ballistics.Current is not { } ballistics) return;
+        ballistics.Fire(origin, dir, muzzle, Walker.GetRid(), hit => Land(hit, origin, dir));
+    }
+
+    /// <summary>Where a bullet ended up (called when it arrives, a few frames after the shot).</summary>
+    private void Land(DeadRecon.Combat.Ballistics.Hit? arrived, Vector3 origin, Vector3 dir)
+    {
+        if (arrived is not { } h) { LastHit = "nothing"; return; }
+        LastPoint = h.Point;
+        if (h.Trunk is { } plant)
         {
-            Effects.Splinters(this, wood.Point, wood.Normal, dir);
-            DeadRecon.World.Foliage.ReportHit(wood.Plant, wood.Point, dir, Damage);
-            LastHit = $"tree trunk at {wood.Point.DistanceTo(cam.Origin):0.0} m";
+            Effects.Splinters(this, h.Point, h.Normal, dir);
+            DeadRecon.World.Foliage.ReportHit(plant, h.Point, dir, Damage);
+            LastHit = $"tree trunk at {h.Distance:0.0} m";
             return;
         }
-        if (hit.Count == 0) { LastHit = "nothing"; return; }
-        var at = (Vector3)hit["position"];
-        var collider = hit["collider"].AsGodotObject();
-        LastHit = $"{((collider as Node)?.Name.ToString() ?? collider?.GetType().Name ?? "?")} at {at.DistanceTo(cam.Origin):0.0} m";
+        var collider = h.Collider;
+        LastHit = $"{((collider as Node)?.Name.ToString() ?? collider?.GetType().Name ?? "?")} at {h.Distance:0.0} m";
         if (collider is IDamageable target)
         {
-            target.TakeHit(Damage, at, cam.Origin);
+            target.TakeHit(Damage, h.Point, origin);
             HitConfirmed?.Invoke(target is DeadRecon.AI.Guard { State: DeadRecon.AI.Guard.Mood.Dead });
         }
-        else if (collider is Node { } node && node.IsInGroup("wood")) Effects.Splinters(this, at, (Vector3)hit["normal"], dir);
-        else Effects.Impact(this, at, (Vector3)hit["normal"]);
+        else if (collider is Node { } node && node.IsInGroup("wood")) Effects.Splinters(this, h.Point, h.Normal, dir);
+        else Effects.Impact(this, h.Point, h.Normal);
     }
 
     private bool _vWasDown;
@@ -228,7 +232,8 @@ public partial class Weapon : Node3D
         _breathShake = Math.Max(0, _breathShake - dt / 2.5f);
 
         float moving = Math.Min(new Vector2(Walker.Velocity.X, Walker.Velocity.Z).Length() / 2f, 1);
-        float amp = (Walker.Crouching ? .0022f : .0042f) * (1 + 2.5f * moving) * (1 + 2 * _breathShake);
+        // Ghost Recon-ish: a gentle drift you can work with, not Arma's wobble.
+        float amp = (Walker.Crouching ? .0009f : .0018f) * (1 + 2.5f * moving) * (1 + 2 * _breathShake);
         if (hold) amp *= .12f;
         float t = _swayTime;
         var sway = new Vector2(MathF.Sin(t * 1.9f) * .5f + MathF.Sin(t * .7f) * .5f, MathF.Sin(t * .95f) + MathF.Sin(t * 2.3f) * .25f) * amp;
