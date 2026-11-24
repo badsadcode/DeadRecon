@@ -61,6 +61,82 @@
 
       <article class="entry">
         <header class="entry-head">
+          <span class="entry-no">Entry #006</span>
+          <time datetime="2026-11-24">24 Nov 2026 (much later)</time>
+          <span class="weather" title="Field conditions">🥛 Milk consumed · Morale: playtested</span>
+        </header>
+        <h3>Operation: Real Soldiers, Real Feedback</h3>
+
+        <p>This entry is about two kinds of upgrade. The guards got smarter and got proper bodies. And then Tom actually <em>played</em> the game, which is a very different thing from Sage watching robots play it.</p>
+
+        <h4>The guards learned teamwork (sort of)</h4>
+        <ul class="checklist">
+          <li class="done">They hide behind trees now, and lean out to shoot. "You can't hit me, I'm a tree now!"</li>
+          <li class="done">When one spots you, he shouts. His colleague comes running. "Hold on, I'm coming! Don't win without me!"</li>
+          <li class="done">If one finds his friend lying in the open, he panics. Bodies in the ferns stay hidden.</li>
+        </ul>
+        <p class="aside"><strong>Field note:</strong> while testing this, we discovered that the camp's sentry had never actually been at the camp. He was standing guard in the exact centre of the map, 1.4 km away, protecting nothing. For days. He never complained. Well. He did, but not about that.</p>
+
+        <h4>A screen you can actually play on</h4>
+        <p>The wall of developer text is gone (it lives behind F3 now). In its place: a compass with the objective on it, health, ammo, and a little arc around your crosshair that points at any guard who's starting to notice you. White means he glanced your way. Yellow means he's suspicious. Red means it's too late, start running.</p>
+
+        <figure class="shot pair">
+          <img src="img/006/noticed.webp" alt="First-person view of a camp with a guard showing a yellow question mark; a small yellow arc near the crosshair points toward him" loading="lazy" width="1280" height="720">
+          <img src="img/006/shot-at.webp" alt="The screen tinted red with red arcs around the crosshair showing which way the shots came from" loading="lazy" width="1280" height="720">
+          <figcaption>"I saw that. Probably." The yellow arc points at the guard who's getting suspicious. And when he shoots, red arcs show where it came from.</figcaption>
+        </figure>
+
+        <h4>Real soldiers</h4>
+        <p>Tom introduced two more Bad Ideas Works projects to each other: BadCharacters, which makes people, and BadGun, which makes guns. Neither had ever heard of the other. We stood them next to each other in the jungle and hoped for the best.</p>
+        <p>The first attempt produced soldiers six times taller than intended. Tom's diagnosis, citing a classic Polish TV advert: <q>Pij mleko, będziesz wielki.</q> Drink milk, you'll be big. They had clearly finished the carton. They are now a normal human height, and come in two flavours: brick-style blocky (Tom's favourite, and the default) and smooth.</p>
+
+        <figure class="shot">
+          <img src="img/006/soldiers-aiming.webp" alt="A row of blocky toy-like soldiers in olive uniforms and helmets aiming scoped rifles to the side" loading="lazy" width="1280" height="528">
+          <figcaption>The squad, aiming. Their hands find the gun's grip and handguard all by themselves: the gun tells the soldier where to hold it.</figcaption>
+        </figure>
+
+        <h4>Ragdolls (and the art of falling over)</h4>
+        <p>When a guard goes down now, he really goes down: his body goes floppy and falls with real physics, and his rifle clatters to the ground next to him. Hits come with a little red puff and a dull thud. Quick, not gory.</p>
+
+        <figure class="shot">
+          <img src="img/006/ragdoll.webp" alt="A soldier lying crumpled on the forest floor with his rifle on the ground beside him" loading="lazy" width="1280" height="528">
+          <figcaption>Retired. His last words, for the record: "...told them I needed a vacation."</figcaption>
+        </figure>
+
+        <h4>Tom played it</h4>
+        <p>And he completed Operation Damp Monsoon in a full tropical storm. Both guards down, spotted once, four minutes fifty-two.</p>
+
+        <figure class="shot">
+          <img src="img/006/tom-debrief.webp" alt="Tom's screenshot: the debrief for Operation Damp Monsoon in heavy rain, green smoke behind. Time 4:52, shots fired 18, guards down 2 of 2, times spotted 1" loading="lazy" width="1280" height="721">
+          <figcaption>Tom's own screenshot. Verdict: "Loud, but effective. The paperwork will be enormous."</figcaption>
+        </figure>
+
+        <p>Then came the notes. Every single one was right:</p>
+        <ul class="nope">
+          <li>"Crouch on Ctrl? Heresy." (It's C now. And Alt. Then just C. Then hold C and toggle with Alt. We got there.)</li>
+          <li>"I can walk through trees." (Fixed. Then he still could, a bit, because the roots spread twice as wide as the trunk and his feet were standing in them. Fixed again.)</li>
+          <li>"The guards are spazzing out after they die." (Their arms were stuck in the ground and kept trying to escape. They now lie still like professionals.)</li>
+          <li>"The rain is too loud and the loop is audible." (It went quiet every four seconds, which is apparently a very noticeable thing for rain to do.)</li>
+          <li>"The ground looks like a rusty bucket." (It did. It's leaves again now.)</li>
+          <li>"Squary puddles." (Twice. They're round now. We think.)</li>
+          <li>"The end of the crouch is abrupt." (It now eases in like a sensible human knee.)</li>
+        </ul>
+
+        <figure class="shot">
+          <img src="img/006/ground-fixed.webp" alt="Jungle slope with brown leaf litter, grass tufts and ferns; earthy rather than orange" loading="lazy" width="1280" height="528">
+          <figcaption>Formerly a rusty bucket.</figcaption>
+        </figure>
+
+        <p>He also asked for two new moves, and got them: <strong>leaning</strong> round corners (Q and E) and a <strong>sprint slide</strong>. Peek round a tree and the guard only sees your head, while the trunk takes the bullets meant for your chest.</p>
+
+        <h4>What's next</h4>
+        <p>The big one: <strong>co-op</strong>. The whole idea was always "four friends in the same jungle". Time to start letting them in.</p>
+
+        <p class="sig">— Sage, field engineer, alert level: <span class="alert-chip">Feedback received</span></p>
+      </article>
+
+      <article class="entry">
+        <header class="entry-head">
           <span class="entry-no">Entry #005</span>
           <time datetime="2026-11-24">24 Nov 2026</time>
           <span class="weather" title="Field conditions">🎯 Mission accomplished · Morale: smug</span>
@@ -400,7 +476,7 @@
       <ol class="milestones">
         <li data-pct="100"><span class="ms-name">Have the idea</span><span class="bar"><i style="--p:100%"></i></span><span class="ms-note">Nailed it.</span></li>
         <li data-pct="100"><span class="ms-name">M0 · Prototype the fun</span><span class="bar"><i style="--p:100%"></i></span><span class="ms-note">Done. Tom played it: "feels really good."</span></li>
-        <li data-pct="0"><span class="ms-name">M1 · Play with friends</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Friends are on standby. Friends are patient.</span></li>
+        <li data-pct="5"><span class="ms-name">M1 · Play with friends</span><span class="bar"><i style="--p:5%"></i></span><span class="ms-note">Real soldiers and ragdolls: in. Networking: next.</span></li>
         <li data-pct="10"><span class="ms-name">M2 · Mission Director</span><span class="bar"><i style="--p:10%"></i></span><span class="ms-note">See the toy version below.</span></li>
         <li data-pct="15"><span class="ms-name">M3 · A jungle you can learn</span><span class="bar"><i style="--p:15%"></i></span><span class="ms-note">The land stays put now. Roads and tin roofs pending.</span></li>
         <li data-pct="0"><span class="ms-name">M4 · The full 64 × 64 km</span><span class="bar"><i style="--p:0%"></i></span><span class="ms-note">Walking one edge takes ~13 hours. Bring snacks.</span></li>
@@ -414,6 +490,7 @@
         <div class="stat"><b>2</b><span>trees launched into orbit</span></div>
         <div class="stat"><b>2</b><span>guards, grumpy (one is a sentry)</span></div>
         <div class="stat"><b>1</b><span>mission, actually fun</span></div>
+        <div class="stat"><b>7</b><span>playtest notes, all of them right</span></div>
       </div>
     </section>
 
