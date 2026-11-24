@@ -5,7 +5,7 @@ using Godot;
 namespace DeadRecon.Player;
 
 /// <summary>
-/// First-person test walker. WASD move, Shift run, C crouch (toggle) or hold Alt (C while sprinting = slide), Q/E lean, Space jump, mouse look (click to capture, Esc to release),
+/// First-person test walker. WASD move, Shift run, C crouch toggle (C while sprinting = slide; not Alt: Shift+Alt switches the Windows keyboard layout), Q/E lean, Space jump, mouse look (click to capture, Esc to release),
 /// F4 toggles fly mode (debug: no collision; Shift = fast, Space/Ctrl = up/down). Has health; guards can shoot it.
 /// </summary>
 public partial class Walker : CharacterBody3D, IDamageable
@@ -109,7 +109,10 @@ public partial class Walker : CharacterBody3D, IDamageable
             if (key.PhysicalKeycode == Key.C && !Dead && !Flying)
             {
                 // From a sprint, C is a slide that ends crouched; otherwise it toggles crouch.
-                if (Running && IsOnFloor() && _slide <= 0) StartSlide();
+                // Sprinting = moving fast; "on the floor" with a little grace, because running over bumpy ground
+                // leaves the floor for a split second all the time.
+                var hv = new Vector2(Velocity.X, Velocity.Z).Length();
+                if (hv > 5.2f && _sinceFloor < .25f && _slide <= 0) StartSlide();
                 else _crouchToggle = !_crouchToggle;
             }
         }
@@ -133,7 +136,7 @@ public partial class Walker : CharacterBody3D, IDamageable
     public float Lean => _lean;
     public bool Sliding => _slide > 0;
     private const float LeanOffset = .42f, LeanRoll = .2f, SlideTime = .85f, SlideSpeed = 9.5f;
-    private float _lean, _slide;
+    private float _lean, _slide, _sinceFloor;
     private Vector3 _slideDir;
 
     private void StartSlide()
@@ -192,7 +195,7 @@ public partial class Walker : CharacterBody3D, IDamageable
             return;
         }
 
-        Crouching = _crouchToggle || Input.IsPhysicalKeyPressed(Key.Alt) || _slide > 0;
+        Crouching = _crouchToggle || _slide > 0;
         _eye = Mathf.MoveToward(_eye, _slide > 0 ? CrouchEye - .15f : Crouching ? CrouchEye : EyeHeight, dt * (_slide > 0 ? 7 : 4));
 
         // Lean: hold Q (left) or E (right); not while sprinting or sliding.
@@ -214,13 +217,25 @@ public partial class Walker : CharacterBody3D, IDamageable
             float k = Math.Max(0, _slide / SlideTime);
             wish = (_slideDir * SlideSpeed * (.35f + .65f * k)) + wish * .15f;
         }
+        _sinceFloor = IsOnFloor() ? 0 : _sinceFloor + dt;
         var v = Velocity;
         v.X = wish.X; v.Z = wish.Z;
         if (IsOnFloor()) { if (Input.IsPhysicalKeyPressed(Key.Space) && !Crouching) v.Y = JumpSpeed; }
         else v.Y -= Gravity * dt;
         Velocity = v;
         MoveAndSlide();
-        GlobalPosition = DeadRecon.World.Foliage.PushOut(GlobalPosition, .35f); // trunks are solid
+        // Trunks are solid: push out, and drop the part of our motion that goes into the bark so we glide round it.
+        var pushed = DeadRecon.World.Foliage.PushOut(GlobalPosition, .35f);
+        var nudge = pushed - GlobalPosition; nudge.Y = 0;
+        if (nudge.LengthSquared() > 1e-8f)
+        {
+            GlobalPosition = pushed;
+            var n = nudge.Normalized();
+            var vel = Velocity;
+            float into = vel.Dot(n);
+            if (into < 0) Velocity = vel - n * into;
+            _slide = Math.Min(_slide, .1f);   // sliding into a tree ends the slide
+        }
 
         // Footsteps are audible to guards: running carries, sneaking barely does.
         if (IsOnFloor() && wish.LengthSquared() > .1f)

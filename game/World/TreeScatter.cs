@@ -35,6 +35,7 @@ public partial class TreeScatter : Node3D
     };
 
     private readonly List<ArrayMesh[]> _variants = new(); // [variant][lod]
+    private readonly List<float> _trunkRadius = new();    // per variant, measured from the model at body height (scale 1)
     private static readonly List<(BaseMaterial3D Mat, float Rough, Color Albedo)> WetMaterials = new();
 
     /// <summary>Places with no trees (mission camp, landing zone): centre (x, z) and radius. Set before planting.</summary>
@@ -114,6 +115,7 @@ public partial class TreeScatter : Node3D
             }
             if (!ok) break;
             _variants.Add(lods);
+            _trunkRadius.Add(MeasureTrunk(lods[0]));
         }
         WetMaterials.Clear();
         Foliage.TrunkHit += OnTrunkHit;
@@ -257,7 +259,7 @@ public partial class TreeScatter : Node3D
                 };
                 trees[k2].Add(new Transform3D(basis, new Vector3(x, baseY - .3f * scale, z)));
                 // For AI sight and bullets: trunk up to where the crown starts, crown as a leafy cylinder. Model is ~17 m tall.
-                float height = TreeHeight * scale, trunkR = .32f * scale;
+                float height = TreeHeight * scale, trunkR = _trunkRadius[picks[k2]] * scale;
                 treeRef.Plant = new Foliage.Plant(x, z, baseY, Math.Max(trunkR, .06f), height * .62f,
                                                   height * .55f, height, 3.2f * scale, layer.LodBias > 0 ? .55f : .35f, treeRef);
                 blockers.Add(treeRef.Plant);
@@ -406,6 +408,26 @@ public partial class TreeScatter : Node3D
         var foot = treeXf.Origin + Vector3.Up * .3f * s;
         stump.SetMeta("foliage", Foliage.Add(new[] { new Foliage.Plant(foot.X, foot.Z, foot.Y, Math.Max(.32f * s, .06f), cut, 0, 0, 0, 0) }));
         return stump;
+    }
+
+    /// <summary>
+    /// How thick the trunk really is where people bump into it: the trunk surface's vertices between 0.4 and 1.8 m,
+    /// 85th percentile of their distance from the axis (so the root flare counts, a stray root doesn't).
+    /// </summary>
+    private static float MeasureTrunk(ArrayMesh mesh)
+    {
+        var d = new List<float>();
+        for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+        {
+            var mat = mesh.SurfaceGetMaterial(s);
+            if (mat is BaseMaterial3D bm && bm.Transparency != BaseMaterial3D.TransparencyEnum.Disabled) continue; // leaves
+            foreach (var v in mesh.SurfaceGetArrays(s)[(int)Mesh.ArrayType.Vertex].AsVector3Array())
+                if (v.Y > .4f && v.Y < 1.8f) d.Add(new Vector2(v.X, v.Z).Length());
+        }
+        if (d.Count < 8) return .45f;
+        d.Sort();
+        float r = d[(int)(d.Count * .85f)];
+        return Math.Clamp(r, .15f, 1.2f);
     }
 
     /// <summary>A small random shift in brightness and hue (yellower or bluer greens), darkened by the layer's shade.</summary>
