@@ -49,13 +49,35 @@ public partial class Walker : CharacterBody3D, IDamageable
         ApplyLook();
     }
 
-    /// <summary>Kick the view (radians): up by <paramref name="pitch"/>, sideways by <paramref name="yaw"/>.</summary>
+    /// <summary>
+    /// Kick the view (radians): up by <paramref name="pitch"/>, sideways by <paramref name="yaw"/>. About a third
+    /// stays (you have to pull down a little in long bursts); the rest springs back within a quarter second.
+    /// </summary>
     public void AddRecoil(float pitch, float yaw)
     {
-        _pitch = Math.Clamp(_pitch + pitch, -1.5f, 1.5f);
-        _yaw += yaw;
+        _pitch = Math.Clamp(_pitch + pitch * .35f, -1.5f, 1.5f);
+        _yaw += yaw * .5f;
+        _recoilKick += pitch * .65f;
+        _recoilYaw += yaw * .5f;
         ApplyLook();
     }
+
+    private AudioStreamPlayer? _crack;
+
+    /// <summary>A bullet just went past close by.</summary>
+    public void HearCrack()
+    {
+        if (_crack == null) { _crack = new AudioStreamPlayer { Bus = "Effects", VolumeDb = -3, MaxPolyphony = 3 }; AddChild(_crack); }
+        _crack.Stream = DeadRecon.Audio.Synth.Crack((int)(GD.Randi() % 4));
+        _crack.PitchScale = (float)GD.RandRange(.9, 1.15);
+        _crack.Play();
+    }
+
+    /// <summary>Extra aim offset in radians (x pitch, y yaw), e.g. scope sway. Doesn't change where you're facing.</summary>
+    public Vector2 AimOffset { get; set; }
+    /// <summary>Set by the weapon while aiming: you move carefully, no sprinting.</summary>
+    public bool Aiming { get; set; }
+    private float _recoilKick, _recoilYaw;
 
     public void SetFlying(bool flying)
     {
@@ -143,7 +165,8 @@ public partial class Walker : CharacterBody3D, IDamageable
     private void ApplyLook()
     {
         Rotation = new Vector3(0, _yaw, 0);
-        Camera.Rotation = new Vector3(_pitch, 0, _deathTilt - _lean * LeanRoll);
+        // Aim offsets on top of where you're looking: scope sway (from the weapon) and the springy part of recoil.
+        Camera.Rotation = new Vector3(_pitch + AimOffset.X + _recoilKick, AimOffset.Y + _recoilYaw, _deathTilt - _lean * LeanRoll);
     }
 
     // ---------------------------------------------------------------- lean and slide
@@ -182,6 +205,9 @@ public partial class Walker : CharacterBody3D, IDamageable
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
+        float spring = MathF.Exp(-dt * 14);
+        _recoilKick *= spring;
+        _recoilYaw *= spring;
         HurtFlash = Math.Max(0, HurtFlash - dt * 1.6f);
         if (Dead)
         {
@@ -198,7 +224,7 @@ public partial class Walker : CharacterBody3D, IDamageable
         var input = new Vector2(
             (Input.IsPhysicalKeyPressed(Key.D) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.A) ? 1 : 0),
             (Input.IsPhysicalKeyPressed(Key.S) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.W) ? 1 : 0));
-        bool fast = Input.IsPhysicalKeyPressed(Key.Shift);
+        bool fast = Input.IsPhysicalKeyPressed(Key.Shift) && !Aiming;   // Shift while aiming holds your breath instead
 
         if (Flying)
         {
@@ -231,6 +257,7 @@ public partial class Walker : CharacterBody3D, IDamageable
 
         float speed = Crouching ? CrouchSpeed : fast ? RunSpeed : WalkSpeed;
         if (_lean != 0) speed = Math.Min(speed, CrouchSpeed);          // you shuffle while leaning
+        if (Aiming) speed = Math.Min(speed, WalkSpeed * .55f);           // aiming down the scope: careful steps
         var wish = (Transform.Basis * new Vector3(input.X, 0, input.Y)).LimitLength(1) * speed;
         Running = fast && !Crouching && wish.LengthSquared() > .1f;
         if (_slide > 0)

@@ -93,7 +93,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -169,6 +169,8 @@ public partial class Main : Node3D
 		}
 		string moveTest = Arg("movetest", "");
 		if (moveTest != "") _ = RunMoveTest(moveTest);
+		string gunTest = Arg("guntest", "");
+		if (gunTest != "") _ = RunGunTest(gunTest);
 		string ragTest = Arg("ragdolltest", "");
 		if (ragTest != "") _ = RunRagdollTest(ragTest);
 		string charTest = Arg("chartest", "");
@@ -331,6 +333,59 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Gun feel check: scope sway standing / crouched / holding breath, recoil recovery, casings.</summary>
+	private async Task RunGunTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		void Key(Godot.Key k, bool down) => Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = k, Keycode = k, Pressed = down });
+		async Task<float> SwayFor(double seconds)
+		{
+			float max = 0; double end = Time.GetTicksMsec() / 1000.0 + seconds;
+			while (Time.GetTicksMsec() / 1000.0 < end) { max = Math.Max(max, _walker.AimOffset.Length()); await Frames(1); }
+			return Mathf.RadToDeg(max) * 60; // arc-minutes
+		}
+		_weather.AutoChange = false;
+		foreach (var g in _guards) g.ProcessMode = ProcessModeEnum.Disabled;
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0); f++) await Frames(1);
+		_weapon.ForceAim(true);
+		await Seconds(1);
+		GD.Print($"[gun] sway standing: {await SwayFor(3):0.0} arcmin");
+		Key(Godot.Key.C, true); await Seconds(.6);
+		GD.Print($"[gun] sway crouched: {await SwayFor(3):0.0} arcmin");
+		Key(Godot.Key.C, false);
+		await Seconds(.6);
+		Key(Godot.Key.Shift, true); await Seconds(.4);
+		GD.Print($"[gun] holding breath: {await SwayFor(2):0.0} arcmin, breath {_weapon.Breath:0.00}");
+		for (int k = 0; k < 4; k++) { await Seconds(.5); GD.Print($"[gun]   +{(k + 1) * .5:0.0}s breath {_weapon.Breath:0.00} holding {_weapon.HoldingBreath} scoped {_weapon.Scoped} shift {Input.IsPhysicalKeyPressed(Godot.Key.Shift)}"); }
+		GD.Print($"[gun] after 4.4 s held: breath {_weapon.Breath:0.00}, holding {_weapon.HoldingBreath}; gasping sway {await SwayFor(1):0.0} arcmin");
+		Key(Godot.Key.Shift, false);
+		await Shot("1_scope_breath");
+		// Recoil: fire 5, measure how much of the climb stays.
+		_weapon.ForceAim(false);
+		await Seconds(1.5);
+		float pitch0 = _walker.Camera.GlobalRotation.X;
+		for (int k = 0; k < 5; k++) { _weapon.TestFire(); await Seconds(.1); }
+		float peak = _walker.Camera.GlobalRotation.X;
+		await Frames(3);
+		await Shot("2_casings_flying");
+		await Seconds(.6);
+		float settled = _walker.Camera.GlobalRotation.X;
+		GD.Print($"[gun] recoil over 5 shots: {Mathf.RadToDeg(peak - pitch0):0.0} deg at the end of the burst, {Mathf.RadToDeg(settled - pitch0):0.0} deg left after 0.6 s");
+		var casings = GetTree().CurrentScene.GetChildren().OfType<MeshInstance3D>().Where(b => b.Mesh is CylinderMesh { Height: < .05f }).ToList();
+		GD.Print($"[gun] casings: {casings.Count}, heights above ground: {string.Join(", ", casings.Select(c => (c.GlobalPosition.Y - _world.HeightAt(c.GlobalPosition.X, c.GlobalPosition.Z)).ToString("0.00")))}");
+		_walker.Look(Mathf.RadToDeg(_walker.Rotation.Y) - 60, -50);
+		await Frames(3);
+		await Shot("3_casings_ground");
 		GetTree().Quit();
 	}
 

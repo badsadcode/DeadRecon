@@ -60,7 +60,7 @@ public static class Effects
 
         _dust ??= new StandardMaterial3D
         {
-            AlbedoColor = new Color(.38f, .30f, .20f, .8f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            AlbedoTexture = Puff(), AlbedoColor = new Color(.38f, .30f, .20f, .8f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles, ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         };
         var dust = new CpuParticles3D
@@ -72,6 +72,16 @@ public static class Effects
         scene.AddChild(dust);
         dust.GlobalTransform = new Transform3D(basis, at);
         context.GetTree().CreateTimer(1.5).Timeout += dust.QueueFree;
+
+        var thup = new AudioStreamPlayer3D
+        {
+            Stream = DeadRecon.Audio.Synth.DirtHit((int)(GD.Randi() % 4)), Bus = "Effects", UnitSize = 4, MaxDistance = 120,
+            PitchScale = (float)GD.RandRange(.85, 1.15),
+        };
+        scene.AddChild(thup);
+        thup.GlobalPosition = at;
+        thup.Play();
+        thup.Finished += thup.QueueFree;
     }
 
     private static StandardMaterial3D? _splinter, _bark;
@@ -249,6 +259,9 @@ public static class Effects
         }
         return Wav(data, Rate);
     }
+
+    /// <summary>A soft round puff texture for smoke, dust and mist (without it particles are hard squares).</summary>
+    public static GradientTexture2D Puff() => _puff ??= SoftPuff();
 
     private static GradientTexture2D SoftPuff()
     {

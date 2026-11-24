@@ -534,6 +534,11 @@ public partial class Guard : CharacterBody3D, IDamageable
         q.Exclude = new Godot.Collections.Array<Rid> { GetRid(), Target.GetRid() };
         var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
         var end = hit.Count > 0 ? (Vector3)hit["position"] : eye + dir * (dist + 30);
+        // A miss that passes close to your head: you hear the supersonic crack (the best "you're being shot at" cue).
+        var head = Target.Camera.GlobalPosition;
+        var seg = end - eye;
+        float along = Math.Clamp((head - eye).Dot(seg) / seg.LengthSquared(), 0, 1);
+        if ((eye + seg * along).DistanceTo(head) < 3.5f) Target.HearCrack();
         if (Foliage.RaycastTrunk(eye, end) is { } tree) { Effects.Splinters(this, tree.Point, tree.Normal, dir); Foliage.ReportHit(tree.Plant, tree.Point, dir, 30); }
         else if (hit.Count > 0) Effects.Impact(this, (Vector3)hit["position"], (Vector3)hit["normal"]);
     }

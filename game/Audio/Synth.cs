@@ -179,6 +179,59 @@ public static class Synth
         return ToWav(buf.ToArray(), gain: shout ? 1 : .8f);
     }
 
+    // ================================================================= bullets
+
+    /// <summary>A bullet into dirt: a short, dull "thup" with a spray of grit.</summary>
+    public static AudioStreamWav DirtHit(int variant) => Cached($"dirt{variant}", () =>
+    {
+        var rng = new Random(300 + variant);
+        int n = (int)(Rate * .14f);
+        var s = new float[n];
+        var lp = Biquad.LowPass(380); var grit = Biquad.BandPass(3200 + rng.Next(1500), 1.5f);
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
+            s[i] = lp.Run(noise) * 3 * MathF.Exp(-t * 55) + grit.Run(noise) * MathF.Exp(-t * 30) * (t > .01f ? 1 : 0);
+        }
+        return ToWav(s, gain: .8f);
+    });
+
+    /// <summary>A bullet passing close by: the sharp supersonic "snap" (an N-wave) and a short whizz after it.</summary>
+    public static AudioStreamWav Crack(int variant) => Cached($"crack{variant}", () =>
+    {
+        var rng = new Random(500 + variant);
+        int n = (int)(Rate * .18f);
+        var s = new float[n];
+        var hp = Biquad.HighPass(1800); var bp = Biquad.BandPass(2400 + rng.Next(1600), 3);
+        int wave = (int)(Rate * .0011f);
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
+            float nwave = i < wave ? 1 - 2f * i / wave : 0;                       // the snap
+            float whizz = bp.Run(noise) * MathF.Exp(-t * 28) * (t > .004f ? 1 : 0);
+            s[i] = nwave * 1.2f + hp.Run(noise) * MathF.Exp(-t * 300) * .6f + whizz * .7f;
+        }
+        return ToWav(s);
+    });
+
+    /// <summary>An empty brass case landing: a couple of high metallic tinks.</summary>
+    public static AudioStreamWav Tink(int variant) => Cached($"tink{variant}", () =>
+    {
+        var rng = new Random(700 + variant);
+        int n = (int)(Rate * .25f);
+        var s = new float[n];
+        float f1 = 3800 + rng.Next(1400), f2 = f1 * 2.71f;
+        int second = (int)(Rate * (.06f + (float)rng.NextDouble() * .05f));
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate, t2 = (i - second) / (float)Rate;
+            float a = MathF.Sin(MathF.Tau * f1 * t) * MathF.Exp(-t * 60) + MathF.Sin(MathF.Tau * f2 * t) * .4f * MathF.Exp(-t * 90);
+            float b = i > second ? (MathF.Sin(MathF.Tau * f1 * 1.03f * t2) * MathF.Exp(-t2 * 70)) * .5f : 0;
+            s[i] = a + b;
+        }
+        return ToWav(s, gain: .5f);
+    });
+
     // ================================================================= ambience
 
     /// <summary>Cicadas: a band of hiss pulsing ~45 times a second, swelling and fading. Seamless 11 s loop.</summary>

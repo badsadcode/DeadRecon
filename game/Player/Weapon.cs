@@ -8,8 +8,9 @@ namespace DeadRecon.Player;
 /// <summary>
 /// First-person test rifle built from a BadGun .glb. Uses the gun's own metadata (glTF extras "badgun"):
 /// SOCKET_ADS (eye position when aiming), SOCKET_Muzzle, and parts with "motion" (Trigger, Magazine, ChargingHandle).
-/// LMB fire (full auto), RMB aim, R reload. Placeholder effects and sounds come from Combat.Effects.
-/// Bullets are hitscan; terrain and characters have collision, trees don't (yet), so trees don't stop bullets.
+/// LMB fire, RMB aim (scope), R reload, V semi/auto, Shift while scoped holds your breath.
+/// Scope sway follows your breathing and stance; recoil springs mostly back. Casings fly from SOCKET_Eject.
+/// Bullets are hitscan; trunks stop them via the foliage registry.
 /// </summary>
 public partial class Weapon : Node3D
 {
@@ -32,9 +33,17 @@ public partial class Weapon : Node3D
     public bool Scoped => _scope?.Visible == true;
     public float AimAmount => _aim;
     public bool Reloading => _reload >= 0;
+    public bool Automatic { get; private set; } = true;
+    /// <summary>0..1 breath left for steadying the scope (Shift while scoped).</summary>
+    public float Breath { get; private set; } = 1;
+    public bool HoldingBreath { get; private set; }
 
     private Node3D _model = null!;
-    private Node3D? _trigger, _magazine, _charging, _muzzle;
+    private Node3D? _trigger, _magazine, _charging, _muzzle, _eject;
+    private float _swayTime, _breathShake;
+    private bool _triggerWasDown, _breathSpent;
+    private readonly Queue<Node3D> _casings = new();
+    private static StandardMaterial3D? _brass, _smoke;
     private Vector3 _magazineRest, _chargingRest, _adsInModel;
     private Vector3 _magazineAxis = Vector3.Down, _chargingAxis = Vector3.Back;
     private float _magazineTravel = .25f, _chargingTravel = .07f, _triggerTravel = .3f;
@@ -60,6 +69,7 @@ public partial class Weapon : Node3D
         _magazine = _model.FindChild("Magazine", true, false) as Node3D;
         _charging = _model.FindChild("ChargingHandle", true, false) as Node3D;
         _muzzle = _model.FindChild("SOCKET_Muzzle", true, false) as Node3D;
+        _eject = _model.FindChild("SOCKET_Eject", true, false) as Node3D;
         ReadMotion(_trigger, ref _triggerTravel, out _);
         if (ReadMotion(_magazine, ref _magazineTravel, out var magAxis)) _magazineAxis = magAxis;
         if (ReadMotion(_charging, ref _chargingTravel, out var chAxis)) _chargingAxis = chAxis;
@@ -68,8 +78,8 @@ public partial class Weapon : Node3D
         if (_model.FindChild("SOCKET_ADS", true, false) is Node3D ads) _adsInModel = InModel(ads).Origin;
         else _adsInModel = new Vector3(0, .1f, -.2f);
 
-        _flashLight = new OmniLight3D { LightColor = new Color(1, .75f, .4f), LightEnergy = 0, OmniRange = 6, ShadowEnabled = false };
-        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.28f, .28f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        _flashLight = new OmniLight3D { LightColor = new Color(1, .72f, .38f), LightEnergy = 0, OmniRange = 9, ShadowEnabled = false };
+        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.34f, .34f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
         (_muzzle ?? _model).AddChild(_flashLight);
         (_muzzle ?? _model).AddChild(_flashSprite);
 
@@ -108,10 +118,18 @@ public partial class Weapon : Node3D
         _scope.Visible = scoped;
         if (scoped) { var vs = GetViewport().GetVisibleRect().Size; _scopeMaterial.SetShaderParameter("aspect", vs.X / vs.Y); }
 
+        Walker.Aiming = _aim > .5f;
+        UpdateCasings(dt);
+        UpdateSway(dt, scoped);
+
         _cooldown -= dt;
         bool trigger = Input.IsMouseButtonPressed(MouseButton.Left);
         if (!trigger) Walker.FireLockedUntilRelease = false;
-        if (captured && trigger && !Walker.FireLockedUntilRelease && _cooldown <= 0 && !Reloading) Fire();
+        bool newPull = trigger && !_triggerWasDown;
+        _triggerWasDown = trigger;
+        if (captured && trigger && (Automatic || newPull) && !Walker.FireLockedUntilRelease && _cooldown <= 0 && !Reloading) Fire();
+        if (captured && Input.IsPhysicalKeyPressed(Key.V) && !_vWasDown) { Automatic = !Automatic; _click.Play(); }
+        _vWasDown = Input.IsPhysicalKeyPressed(Key.V);
         if (captured && Input.IsPhysicalKeyPressed(Key.R) && !Reloading && Ammo < MagazineSize) { _reload = 0; _clack.Play(); }
         UpdateReload(dt);
 
@@ -131,8 +149,9 @@ public partial class Weapon : Node3D
             _flash += dt;
             bool on = _flash < .045f;
             _flashSprite.Visible = on;
-            _flashLight.LightEnergy = on ? 4 : 0;
+            _flashLight.LightEnergy = on ? 6 : 0;
             _flashSprite.Rotation = new Vector3(0, 0, _rng.Randf() * MathF.Tau);
+            _flashSprite.Scale = Vector3.One * (on ? _rng.RandfRange(.8f, 1.4f) : 1);
             if (!on) _flash = -1;
         }
     }
@@ -149,7 +168,10 @@ public partial class Weapon : Node3D
         _shot.PitchScale = 1 + _rng.RandfRange(-.06f, .06f);
         _shot.Play();
         DeadRecon.Audio.Ambience.Current?.Echo(Walker.GlobalPosition);
-        Walker.AddRecoil(Mathf.DegToRad(Mathf.Lerp(.9f, .45f, _aim)), Mathf.DegToRad(_rng.RandfRange(-.35f, .35f)));
+        float steady = Walker.Crouching ? .75f : 1;
+        Walker.AddRecoil(Mathf.DegToRad(Mathf.Lerp(1.1f, .55f, _aim) * steady), Mathf.DegToRad(_rng.RandfRange(-.4f, .4f) * steady));
+        EjectCasing();
+        MuzzleSmoke();
 
         var cam = Walker.Camera.GlobalTransform;
         float spread = Mathf.Lerp(HipSpread, AimSpread, _aim);
@@ -176,6 +198,122 @@ public partial class Weapon : Node3D
         }
         else if (collider is Node { } node && node.IsInGroup("wood")) Effects.Splinters(this, at, (Vector3)hit["normal"], dir);
         else Effects.Impact(this, at, (Vector3)hit["normal"]);
+    }
+
+    private bool _vWasDown;
+
+    /// <summary>
+    /// Scope sway: a slow figure-eight from breathing and heartbeat, bigger standing than crouched and much bigger
+    /// while moving. Shift holds your breath: steady for ~4 s, then a shaky gasp while you recover.
+    /// </summary>
+    private void UpdateSway(float dt, bool scoped)
+    {
+        _swayTime += dt;
+        bool hold = scoped && Input.IsPhysicalKeyPressed(Key.Shift) && Breath > 0 && !_breathSpent;
+        HoldingBreath = hold;
+        if (hold) Breath = Math.Max(0, Breath - dt / 4f);
+        else Breath = Math.Min(1, Breath + dt / (_breathSpent ? 5f : 3f));
+        if (Breath <= 0 && !_breathSpent) { _breathSpent = true; _breathShake = 1; }
+        if (_breathSpent && Breath > .6f) _breathSpent = false;
+        _breathShake = Math.Max(0, _breathShake - dt / 2.5f);
+
+        float moving = Math.Min(new Vector2(Walker.Velocity.X, Walker.Velocity.Z).Length() / 2f, 1);
+        float amp = (Walker.Crouching ? .0022f : .0042f) * (1 + 2.5f * moving) * (1 + 2 * _breathShake);
+        if (hold) amp *= .12f;
+        float t = _swayTime;
+        var sway = new Vector2(MathF.Sin(t * 1.9f) * .5f + MathF.Sin(t * .7f) * .5f, MathF.Sin(t * .95f) + MathF.Sin(t * 2.3f) * .25f) * amp;
+        sway += new Vector2(MathF.Sin(t * 17) * amp * .25f * _breathShake, 0);  // gasping
+        Walker.AimOffset = Walker.AimOffset.Lerp(scoped ? sway : Vector2.Zero, Math.Min(1, dt * 8));
+    }
+
+    /// <summary>One flying case: hand-made ballistics (tiny physics bodies tunnel through the terrain).</summary>
+    private sealed class Casing { public MeshInstance3D Node = null!; public Vector3 Vel, Spin; public int Bounces; public float Age; }
+    private readonly List<Casing> _flying = new();
+
+    /// <summary>An empty case flies out of the ejection port to the right, bounces once or twice, tinks, and lies there.</summary>
+    private void EjectCasing()
+    {
+        _brass ??= new StandardMaterial3D { AlbedoColor = new Color(.78f, .6f, .25f), Metallic = .9f, Roughness = .35f };
+        var node = new MeshInstance3D
+        {
+            Mesh = new CylinderMesh { TopRadius = .0055f, BottomRadius = .0062f, Height = .045f, RadialSegments = 8, Rings = 0 },
+            MaterialOverride = _brass, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        GetTree().CurrentScene.AddChild(node);
+        node.GlobalPosition = (_eject ?? _model).GlobalPosition;
+        node.Rotation = new Vector3(_rng.Randf(), _rng.Randf(), MathF.PI / 2);
+        var cam = Walker.Camera.GlobalTransform.Basis;
+        _flying.Add(new Casing
+        {
+            Node = node,
+            Vel = Walker.Velocity + cam.X * _rng.RandfRange(2.2f, 3.2f) + cam.Y * _rng.RandfRange(1.2f, 2f) + cam.Z * _rng.RandfRange(-.2f, .5f),
+            Spin = new Vector3(_rng.RandfRange(-25, 25), _rng.RandfRange(-25, 25), _rng.RandfRange(-25, 25)),
+        });
+        _casings.Enqueue(node);
+        while (_casings.Count > 40) { var old = _casings.Dequeue(); if (IsInstanceValid(old)) old.QueueFree(); }
+    }
+
+    private void UpdateCasings(float dt)
+    {
+        for (int k = _flying.Count - 1; k >= 0; k--)
+        {
+            var c = _flying[k];
+            if (!IsInstanceValid(c.Node) || (c.Age += dt) > 4) { _flying.RemoveAt(k); continue; }
+            c.Vel += Vector3.Down * 9.8f * dt;
+            var from = c.Node.GlobalPosition;
+            var to = from + c.Vel * dt;
+            var q = PhysicsRayQueryParameters3D.Create(from, to + c.Vel.Normalized() * .01f, 1);
+            var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+            if (hit.Count > 0)
+            {
+                var n = (Vector3)hit["normal"];
+                c.Node.GlobalPosition = (Vector3)hit["position"] + n * .006f;
+                if (c.Bounces == 0)
+                {
+                    var p = new AudioStreamPlayer3D { Stream = DeadRecon.Audio.Synth.Tink(_rng.RandiRange(0, 3)), Bus = "Effects", UnitSize = 1.5f, MaxDistance = 15, VolumeDb = -8 };
+                    GetTree().CurrentScene.AddChild(p);
+                    p.GlobalPosition = c.Node.GlobalPosition;
+                    p.Play();
+                    p.Finished += p.QueueFree;
+                }
+                c.Bounces++;
+                c.Vel = (c.Vel - 2 * c.Vel.Dot(n) * n) * .3f;                  // bounce, losing most of its energy
+                c.Spin *= .4f;
+                if (c.Bounces >= 3 || c.Vel.Length() < .4f)
+                {
+                    // Rest: lying on its side on the ground.
+                    c.Node.Rotation = new Vector3(MathF.PI / 2, c.Node.Rotation.Y, 0);
+                    _flying.RemoveAt(k);
+                }
+                continue;
+            }
+            c.Node.GlobalPosition = to;
+            c.Node.Rotation += c.Spin * dt;
+        }
+    }
+
+    /// <summary>A small grey puff that hangs in the air at the muzzle and drifts away.</summary>
+    private void MuzzleSmoke()
+    {
+        _smoke ??= new StandardMaterial3D
+        {
+            AlbedoTexture = Effects.Puff(), AlbedoColor = new Color(.75f, .75f, .72f, .18f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
+            VertexColorUseAsAlbedo = true,
+        };
+        var fade = new Gradient();
+        fade.SetColor(0, new Color(1, 1, 1, .9f));
+        fade.SetColor(1, new Color(1, 1, 1, 0));
+        var puff = new CpuParticles3D
+        {
+            Emitting = true, OneShot = true, Amount = 5, Lifetime = 1.4f, Explosiveness = .9f, LocalCoords = false,
+            Direction = Vector3.Up, Spread = 40, InitialVelocityMin = .2f, InitialVelocityMax = .6f, Gravity = new Vector3(.2f, .35f, 0),
+            ScaleAmountMin = .5f, ScaleAmountMax = 1f, Mesh = new QuadMesh { Size = new Vector2(.12f, .12f) }, MaterialOverride = _smoke, ColorRamp = fade,
+        };
+        GetTree().CurrentScene.AddChild(puff);
+        // A little ahead of the barrel, so it never sits on top of the camera.
+        puff.GlobalPosition = (_muzzle ?? _model).GlobalPosition - Walker.Camera.GlobalTransform.Basis.Z * .25f;
+        GetTree().CreateTimer(1.6).Timeout += () => { if (IsInstanceValid(puff)) puff.QueueFree(); };
     }
 
     private void UpdateReload(float dt)

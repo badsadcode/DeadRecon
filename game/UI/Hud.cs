@@ -91,6 +91,7 @@ public partial class Hud : Control
         {
             Text(new Vector2(size.X - 260, size.Y - 34), $"{Rifle.Ammo}", 40, Rifle.Ammo == 0 ? Danger : Ink, HorizontalAlignment.Right, 150);
             Text(new Vector2(size.X - 104, size.Y - 34), $"/ {Rifle.MagazineCapacity}", 20, Dim);
+            Text(new Vector2(size.X - 260, size.Y - 112), Rifle.Automatic ? "AUTO" : "SEMI", 14, Dim, HorizontalAlignment.Right, 228);
             if (Rifle.Reloading) Text(new Vector2(size.X - 260, size.Y - 84), "RELOADING", 16, Amber, HorizontalAlignment.Right, 228);
             else if (Rifle.Ammo == 0) Text(new Vector2(size.X - 260, size.Y - 84), "R TO RELOAD", 16, Danger, HorizontalAlignment.Right, 228);
         }
@@ -102,6 +103,15 @@ public partial class Hud : Control
             DrawArc(p, 18, 0, MathF.Tau, 32, new Color(0, 0, 0, .4f), 4);
             if (Mission.SearchProgress > 0) DrawArc(p, 18, -MathF.PI / 2, -MathF.PI / 2 + MathF.Tau * Mission.SearchProgress, 32, Amber, 4);
             Text(p + new Vector2(-200, 46), $"Hold F: take {Mission.IntelName}", 18, Ink, HorizontalAlignment.Center, 400);
+        }
+
+        // Breath (scope only): a thin bar under the reticle; amber while holding, red when spent.
+        if (Rifle.Scoped && (Rifle.HoldingBreath || Rifle.Breath < .999f))
+        {
+            var b = centre + new Vector2(-60, size.Y * .3f);
+            DrawRect(new Rect2(b, new Vector2(120, 5)), new Color(0, 0, 0, .5f));
+            DrawRect(new Rect2(b, new Vector2(120 * Rifle.Breath, 5)), Rifle.HoldingBreath ? Amber : Rifle.Breath < .3f ? Danger : Ink);
+            Text(b + new Vector2(0, -6), Rifle.HoldingBreath ? "HOLDING BREATH" : "BREATH", 12, Dim, HorizontalAlignment.Center, 120);
         }
 
         DrawDetection(centre);
