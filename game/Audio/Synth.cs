@@ -95,7 +95,7 @@ public static class Synth
             {
                 // Dry litter: a soft heel thud, then a scatter of tiny crackles (leaves breaking) over ~120 ms.
                 var crackle = Biquad.BandPass(2600 + rng.Next(1200), 1.2f);
-                var thud = Biquad.LowPass(180);
+                var thud = Biquad.LowPass(240);
                 var crackTimes = new List<int>();
                 for (int k = 0; k < 9 + rng.Next(6); k++) crackTimes.Add((int)(Rate * (.005 + rng.NextDouble() * .12)));
                 for (int i = 0; i < n; i++)
@@ -103,7 +103,8 @@ public static class Synth
                     float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
                     float c = 0;
                     foreach (int ct in crackTimes) { int d = i - ct; if (d >= 0 && d < Rate * .006f) c += MathF.Exp(-d / (Rate * .0012f)); }
-                    s[i] = crackle.Run(noise) * (c * 1.4f + .25f * MathF.Exp(-t * 25)) + thud.Run(noise) * 3 * MathF.Exp(-t * 40);
+                    // Close-up: a solid heel/sole thump carries the "it's my foot" feeling; the crackle sits on top.
+                    s[i] = crackle.Run(noise) * (c * 1.2f + .2f * MathF.Exp(-t * 25)) + thud.Run(noise) * 6 * MathF.Exp(-t * 32);
                 }
                 break;
             }

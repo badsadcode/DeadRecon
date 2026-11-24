@@ -7,7 +7,7 @@ namespace DeadRecon.Audio;
 /// <summary>
 /// The jungle's sound: a low bed, cicadas, birds calling from the trees around you (fewer in rain, silent in a
 /// storm), and the echo that rolls back after every gunshot. Also sets up the audio buses (Master > Effects /
-/// Ambience / Voices) with a reverb on Effects so shots ring through the trees.
+/// Ambience / Voices / Foley) with a reverb on Effects so shots ring through the trees.
 /// </summary>
 public partial class Ambience : Node3D
 {
@@ -45,6 +45,7 @@ public partial class Ambience : Node3D
         int fx = Bus("Effects");
         Bus("Ambience");
         Bus("Voices");
+        Bus("Foley");          // your own body (footsteps): dry, no reverb, so it sounds right at your feet
         if (AudioServer.GetBusEffectCount(fx) == 0)
             AudioServer.AddBusEffect(fx, new AudioEffectReverb { RoomSize = .75f, Damping = .6f, Wet = .16f, Dry = 1, Spread = .9f, Hipass = .15f });
         ApplyVolumes();

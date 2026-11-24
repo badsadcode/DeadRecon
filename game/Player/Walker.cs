@@ -99,11 +99,11 @@ public partial class Walker : CharacterBody3D, IDamageable
 
     private void PlayStep()
     {
-        if (_steps == null) { _steps = new AudioStreamPlayer { Bus = "Effects", MaxPolyphony = 3 }; AddChild(_steps); }
+        if (_steps == null) { _steps = new AudioStreamPlayer { Bus = "Foley", MaxPolyphony = 3 }; AddChild(_steps); }
         var surface = SurfaceAt?.Invoke(GlobalPosition) ?? DeadRecon.Audio.Synth.Surface.Leaves;
         _stepVariant = (_stepVariant + 1 + (int)GD.Randi() % 3) % 6;
         _steps.Stream = DeadRecon.Audio.Synth.Step(surface, _stepVariant);
-        _steps.VolumeDb = Crouching ? -20 : Running ? -6 : -11;
+        _steps.VolumeDb = Crouching ? -14 : Running ? -2 : -6;
         _steps.PitchScale = (float)GD.RandRange(.9, 1.1);
         _steps.Play();
     }
