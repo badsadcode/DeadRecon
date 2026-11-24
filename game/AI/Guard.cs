@@ -49,6 +49,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     public float Suspicion { get; private set; }
     public float Health { get; private set; } = 100;
     public bool CanSeeTarget => _seen;
+    public void SetHealthForTest(float h) => Health = h;
     /// <summary>0..1 how much of the player he can see right now (0 outside his view, behind terrain or trunks).</summary>
     public float Exposure { get; private set; }
 
@@ -515,8 +516,10 @@ public partial class Guard : CharacterBody3D, IDamageable
         else if (Target.Velocity.LengthSquared() > .5f) chance *= .75f;
         if (Target.Crouching) chance *= .8f;
         // A trunk between us takes the bullet, hit or miss: hiding behind a tree works.
+        var from = _muzzle?.GlobalPosition ?? eye;
         if (Foliage.RaycastTrunk(eye, Target.Chest) is { } wood)
         {
+            Effects.Tracer(this, from, wood.Point, enemy: true);
             var shotDir = (Target.Chest - eye).Normalized();
             Effects.Splinters(this, wood.Point, wood.Normal, shotDir);
             Foliage.ReportHit(wood.Plant, wood.Point, shotDir, 30);
@@ -524,6 +527,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         }
         if (_rng.Randf() < chance)
         {
+            Effects.Tracer(this, from, Target.Chest - (Target.Chest - from).Normalized() * .4f, enemy: true);
             Target.TakeHit(_rng.RandfRange(11, 18), Target.Chest, eye);
             return;
         }
@@ -539,6 +543,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         var seg = end - eye;
         float along = Math.Clamp((head - eye).Dot(seg) / seg.LengthSquared(), 0, 1);
         if ((eye + seg * along).DistanceTo(head) < 3.5f) Target.HearCrack();
+        Effects.Tracer(this, from, Foliage.RaycastTrunk(eye, end)?.Point ?? end, enemy: true);
         if (Foliage.RaycastTrunk(eye, end) is { } tree) { Effects.Splinters(this, tree.Point, tree.Normal, dir); Foliage.ReportHit(tree.Plant, tree.Point, dir, 30); }
         else if (hit.Count > 0) Effects.Impact(this, (Vector3)hit["position"], (Vector3)hit["normal"]);
     }

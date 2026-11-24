@@ -93,7 +93,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -169,6 +169,8 @@ public partial class Main : Node3D
 		}
 		string moveTest = Arg("movetest", "");
 		if (moveTest != "") _ = RunMoveTest(moveTest);
+		string rangeTest = Arg("rangetest", "");
+		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
 		string ragTest = Arg("ragdolltest", "");
@@ -333,6 +335,91 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Shooting range: a still guard at several distances, scope on his chest, 10 shots each; logs every hit.</summary>
+	private async Task RunRangeTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false;
+		_walker.Invulnerable = true;
+		var g = _guards.First(x => !x.Sentry);
+		// Stand still. Not ProcessMode.Disabled: that also removes a body from physics, and bullets pass through.
+		foreach (var x in _guards) { x.SetPhysicsProcess(false); x.SetProcess(false); }
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0); f++) await Frames(1);
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = g.GlobalPosition + Vector3.Up * 30;
+		for (int f = 0; f < 600 && !_terrain.HasCollisionAt(g.GlobalPosition); f++) await Frames(1);
+		await Seconds(1);
+		var chest = g.GlobalPosition + Vector3.Up * 1.0f;   // belly: a stray headshot would kill him and spoil the count
+		foreach (float dist in new[] { 25f, 50f, 80f, 120f })
+		{
+			// Find a spot at this distance with no trunk in the way (fly, at standing eye height above the ground).
+			Vector3 eye = Vector3.Zero; bool found = false;
+			for (int k = 0; k < 64 && !found; k++)
+			{
+				var c = g.GlobalPosition + new Vector3(MathF.Cos(k * .39f) * dist, 0, MathF.Sin(k * .39f) * dist);
+				c.Y = _world.HeightAt(c.X, c.Z) + 1.65f;
+				if (Foliage.RaycastTrunk(c, chest) != null) continue;
+				var q = PhysicsRayQueryParameters3D.Create(c, chest);
+				q.Exclude = new Godot.Collections.Array<Rid> { _walker.GetRid() };
+				var h = GetWorld3D().DirectSpaceState.IntersectRay(q);
+				if (h.Count > 0 && h["collider"].AsGodotObject() != g) continue;    // terrain in the way
+				// Check from where the camera will really be.
+				_walker.GlobalPosition = c - Vector3.Up * 1.65f;
+				await Frames(1);
+				var cam0 = _walker.Camera.GlobalPosition;
+				var q2 = PhysicsRayQueryParameters3D.Create(cam0, chest);
+				q2.Exclude = new Godot.Collections.Array<Rid> { _walker.GetRid() };
+				var h2 = GetWorld3D().DirectSpaceState.IntersectRay(q2);
+				if (h2.Count > 0 && h2["collider"].AsGodotObject() != g) continue;
+				if (_guards.Any(o => o != g && o.GlobalPosition.DistanceTo(cam0) < dist + 2 && (o.GlobalPosition + Vector3.Up - cam0).Normalized().Dot((chest - cam0).Normalized()) > .995f)) continue; // the other guard in the way
+				if (Foliage.RaycastTrunk(cam0, chest) != null) continue;
+				eye = c; found = true;
+			}
+			if (!found) { GD.Print($"[range] {dist} m: no clear line"); continue; }
+			_weapon.ForceAim(true);
+			int hits = 0;
+			var log = new System.Collections.Generic.Dictionary<string, int>();
+			for (int k = 0; k < 10; k++)
+			{
+				LookAt(chest);
+				await Frames(2);
+				float hp = g.Health;
+				_weapon.TestReload();
+				_weapon.TestFire();
+				string what = _weapon.LastHit;
+				string key = what.Contains("Character") ? (g.Health < hp ? "target" : "OTHER guard") : what.Split(" at ")[0];
+				log[key] = (log.TryGetValue(key, out var cnt) ? cnt : 0) + 1;
+				if (g.Health < hp) hits++;
+				g.SetHealthForTest(100);
+				await Seconds(.25);
+			}
+			if (dist == 80)
+			{
+				_weapon.ForceAim(false);
+				await Seconds(.4);
+				LookAt(chest + Vector3.Up * .3f);
+				await Frames(2);
+				_weapon.TestReload(); _weapon.TestFire();
+				await Seconds(.12);   // the streak is mid-flight
+				await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+				GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, "tracer_80m.png"));
+				await Seconds(.17);   // arriving: the spark
+				await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+				GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, "tracer_80m_impact.png"));
+				_weapon.ForceAim(true);
+			}
+			GD.Print($"[range] {dist} m: {hits}/10 hits on the chest; bullets hit: {string.Join(", ", log.Select(kv => $"{kv.Key} x{kv.Value}"))}; sway now {Mathf.RadToDeg(_walker.AimOffset.Length()) * 60:0.0}'");
+		}
 		GetTree().Quit();
 	}
 

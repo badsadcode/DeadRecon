@@ -37,6 +37,8 @@ public partial class Weapon : Node3D
     /// <summary>0..1 breath left for steadying the scope (Shift while scoped).</summary>
     public float Breath { get; private set; } = 1;
     public bool HoldingBreath { get; private set; }
+    /// <summary>What the last bullet hit (tests).</summary>
+    public string LastHit { get; private set; } = "";
 
     private Node3D _model = null!;
     private Node3D? _trigger, _magazine, _charging, _muzzle, _eject;
@@ -78,7 +80,7 @@ public partial class Weapon : Node3D
         if (_model.FindChild("SOCKET_ADS", true, false) is Node3D ads) _adsInModel = InModel(ads).Origin;
         else _adsInModel = new Vector3(0, .1f, -.2f);
 
-        _flashLight = new OmniLight3D { LightColor = new Color(1, .72f, .38f), LightEnergy = 0, OmniRange = 9, ShadowEnabled = false };
+        _flashLight = new OmniLight3D { LightColor = new Color(1, .72f, .38f), LightEnergy = 0, OmniRange = 6, ShadowEnabled = false };
         _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.34f, .34f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
         (_muzzle ?? _model).AddChild(_flashLight);
         (_muzzle ?? _model).AddChild(_flashSprite);
@@ -149,7 +151,7 @@ public partial class Weapon : Node3D
             _flash += dt;
             bool on = _flash < .045f;
             _flashSprite.Visible = on;
-            _flashLight.LightEnergy = on ? 6 : 0;
+            _flashLight.LightEnergy = on ? 2.5f : 0;
             _flashSprite.Rotation = new Vector3(0, 0, _rng.Randf() * MathF.Tau);
             _flashSprite.Scale = Vector3.One * (on ? _rng.RandfRange(.8f, 1.4f) : 1);
             if (!on) _flash = -1;
@@ -168,29 +170,37 @@ public partial class Weapon : Node3D
         _shot.PitchScale = 1 + _rng.RandfRange(-.06f, .06f);
         _shot.Play();
         DeadRecon.Audio.Ambience.Current?.Echo(Walker.GlobalPosition);
+        // The bullet leaves where you were aiming *before* this shot's recoil moves the view.
+        // (Applying recoil first sent every bullet ~0.5 degrees high: a metre over the head at 100 m.)
+        var cam = Walker.Camera.GlobalTransform;
+        float spread = Mathf.Lerp(HipSpread, AimSpread, _aim);
+        var dir = (-cam.Basis.Z + cam.Basis.X * _rng.RandfRange(-spread, spread) + cam.Basis.Y * _rng.RandfRange(-spread, spread)).Normalized();
+
         float steady = Walker.Crouching ? .75f : 1;
         Walker.AddRecoil(Mathf.DegToRad(Mathf.Lerp(1.1f, .55f, _aim) * steady), Mathf.DegToRad(_rng.RandfRange(-.4f, .4f) * steady));
         EjectCasing();
         MuzzleSmoke();
-
-        var cam = Walker.Camera.GlobalTransform;
-        float spread = Mathf.Lerp(HipSpread, AimSpread, _aim);
-        var dir = (-cam.Basis.Z + cam.Basis.X * _rng.RandfRange(-spread, spread) + cam.Basis.Y * _rng.RandfRange(-spread, spread)).Normalized();
         var query = PhysicsRayQueryParameters3D.Create(cam.Origin, cam.Origin + dir * Range);
         query.Exclude = new Godot.Collections.Array<Rid> { Walker.GetRid() };
         var hit = GetWorld3D().DirectSpaceState.IntersectRay(query);
         Hearing.Make(cam.Origin, Hearing.Gunshot, Walker);
         // Trunks aren't physics objects; ask the foliage registry whether one is closer than whatever the ray hit.
         var end = hit.Count > 0 ? (Vector3)hit["position"] : cam.Origin + dir * Range;
-        if (DeadRecon.World.Foliage.RaycastTrunk(cam.Origin, end) is { } wood)
+        var trunk = DeadRecon.World.Foliage.RaycastTrunk(cam.Origin, end);
+        // Tracer from the muzzle (or just below the eye when scoped: the gun is hidden then) to where it lands.
+        var muzzle = Scoped || _muzzle == null ? cam.Origin - cam.Basis.Y * .06f + dir * .4f : _muzzle.GlobalPosition;
+        Effects.Tracer(this, muzzle, trunk?.Point ?? end);
+        if (trunk is { } wood)
         {
             Effects.Splinters(this, wood.Point, wood.Normal, dir);
             DeadRecon.World.Foliage.ReportHit(wood.Plant, wood.Point, dir, Damage);
+            LastHit = $"tree trunk at {wood.Point.DistanceTo(cam.Origin):0.0} m";
             return;
         }
-        if (hit.Count == 0) return;
+        if (hit.Count == 0) { LastHit = "nothing"; return; }
         var at = (Vector3)hit["position"];
         var collider = hit["collider"].AsGodotObject();
+        LastHit = $"{((collider as Node)?.Name.ToString() ?? collider?.GetType().Name ?? "?")} at {at.DistanceTo(cam.Origin):0.0} m";
         if (collider is IDamageable target)
         {
             target.TakeHit(Damage, at, cam.Origin);

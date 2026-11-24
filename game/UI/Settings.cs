@@ -16,6 +16,7 @@ public static class Settings
     public static string SoldierStyle { get; set; } = "blocky";
     public static float MasterVolume { get; set; } = .8f;
     public static float AmbienceVolume { get; set; } = 1;
+    public static bool Tracers { get; set; } = true;
 
     // What difficulty does to the guards.
     /// <summary>How far and how quickly guards notice you.</summary>
@@ -45,6 +46,7 @@ public static class Settings
         SoldierStyle = (string)cfg.GetValue("game", "soldier_style", "blocky");
         MasterVolume = Math.Clamp((float)cfg.GetValue("audio", "master", .8f), 0, 1);
         AmbienceVolume = Math.Clamp((float)cfg.GetValue("audio", "ambience", 1f), 0, 1.5f);
+        Tracers = (bool)cfg.GetValue("game", "tracers", true);
     }
 
     public static void Save()
@@ -57,6 +59,7 @@ public static class Settings
         cfg.SetValue("game", "soldier_style", SoldierStyle);
         cfg.SetValue("audio", "master", MasterVolume);
         cfg.SetValue("audio", "ambience", AmbienceVolume);
+        cfg.SetValue("game", "tracers", Tracers);
         cfg.Save(Path);
     }
 }

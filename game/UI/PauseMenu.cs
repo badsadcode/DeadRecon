@@ -70,6 +70,7 @@ public partial class PauseMenu : CanvasLayer
         Row(box, "Mouse sensitivity", sensRow);
 
         Check(box, "Invert mouse Y", Settings.InvertY, v => Settings.InvertY = v);
+        Check(box, "Bullet tracers", Settings.Tracers, v => Settings.Tracers = v);
         Check(box, "Show debug info (F3)", Settings.ShowDebug, v => Settings.ShowDebug = v);
 
         box.AddChild(new HSeparator());

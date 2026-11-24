@@ -33,7 +33,7 @@ public static class Hearing
 }
 
 /// <summary>Shared placeholder effects: bullet impacts, muzzle-flash material, synthesised sounds.</summary>
-public static class Effects
+public static partial class Effects
 {
     private static readonly Queue<Node3D> Holes = new();
     private static StandardMaterial3D? _flash, _hole, _dust;
@@ -258,6 +258,99 @@ public static class Effects
             data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
         }
         return Wav(data, Rate);
+    }
+
+
+    /// <summary>
+    /// A tracer: a short glowing streak that flies from the muzzle to where the bullet landed (~350 m/s, slowed
+    /// down from a real bullet so the eye can follow it), with a faint fading line behind it showing the whole path.
+    /// Kept a couple of pixels wide at any distance. Off in settings.
+    /// </summary>
+    public static void Tracer(Node context, Vector3 from, Vector3 to, bool enemy = false)
+    {
+        if (!DeadRecon.UI.Settings.Tracers || from.DistanceTo(to) < .5f) return;
+        var t = new TracerFx { From = from, To = to, Enemy = enemy };
+        context.GetTree().CurrentScene.AddChild(t);
+    }
+
+    private sealed partial class TracerFx : Node3D
+    {
+        public Vector3 From, To;
+        public bool Enemy;
+        private MeshInstance3D _streak = null!, _trail = null!;
+        private float _t, _len;
+        private bool _sparked;
+        private MeshInstance3D? _spark;
+        private const float Speed = 300, StreakLength = 14, TrailFade = .45f;
+        private static StandardMaterial3D? _mat;
+
+        public override void _Ready()
+        {
+            _mat ??= new StandardMaterial3D
+            {
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                BlendMode = BaseMaterial3D.BlendModeEnum.Add, VertexColorUseAsAlbedo = true, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                NoDepthTest = false,
+            };
+            _len = From.DistanceTo(To);
+            var head = Enemy ? new Color(1, .4f, .25f, 1) : new Color(1, .88f, .55f, 1);
+            _streak = new MeshInstance3D { Mesh = Beam(1, new Color(head, 0), head), MaterialOverride = _mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+            _trail = new MeshInstance3D { Mesh = Beam(1, new Color(head, .05f), new Color(head, .6f)), MaterialOverride = _mat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+            AddChild(_trail);
+            AddChild(_streak);
+        }
+
+        /// <summary>A unit-length cross of two quads along -Z, coloured from tail (z=0) to head (z=-1).</summary>
+        private static ArrayMesh Beam(float len, Color tail, Color head)
+        {
+            var st = new SurfaceTool();
+            st.Begin(Mesh.PrimitiveType.Triangles);
+            foreach (var side in new[] { Vector3.Right, Vector3.Up })
+            {
+                void V(Vector3 p, Color c) { st.SetColor(c); st.AddVertex(p); }
+                var a = -side * .5f; var b = side * .5f; var z = new Vector3(0, 0, -len);
+                V(a, tail); V(b, tail); V(b + z, head);
+                V(a, tail); V(b + z, head); V(a + z, head);
+            }
+            return st.Commit();
+        }
+
+        public override void _Process(double delta)
+        {
+            _t += (float)delta;
+            var cam = GetViewport().GetCamera3D();
+            var dir = (To - From) / _len;
+            var basis = Basis.LookingAt(dir, Math.Abs(dir.Y) > .99f ? Vector3.Right : Vector3.Up);
+            float headAt = Math.Min(_len, _t * Speed);
+            float tailAt = Math.Max(0, headAt - StreakLength);
+            // Width: about 2 px wherever it is (scale with distance from the camera), never thinner than 1.5 cm.
+            float Width(Vector3 p) => Math.Max(.02f, (cam?.GlobalPosition.DistanceTo(p) ?? 10) * .0026f * ((cam?.Fov ?? 70) / 70f));
+            var headPos = From + dir * headAt;
+            float w = Width(headPos);
+            _streak.Visible = headAt < _len + .01f && _t * Speed < _len + StreakLength;
+            _streak.GlobalTransform = new Transform3D(basis * Basis.FromScale(new Vector3(w, w, Math.Max(.01f, headAt - tailAt))), From + dir * tailAt); // local scale (Scaled() is world-axis)
+            // The faint line behind, fading out after the streak arrives.
+            float arrive = _len / Speed, fade = Math.Clamp(1 - (_t - arrive) / TrailFade, 0, 1);
+            _trail.GlobalTransform = new Transform3D(basis * Basis.FromScale(new Vector3(w * .7f, w * .7f, Math.Max(.01f, headAt))), From);
+            _trail.Transparency = 1 - fade * .8f;
+            // When it arrives: a small bright spark where it landed (sized to stay visible far away).
+            if (!_sparked && _t >= arrive)
+            {
+                _sparked = true;
+                _spark = new MeshInstance3D { Mesh = new SphereMesh { Radius = .5f, Height = 1, RadialSegments = 8, Rings = 4 }, MaterialOverride = _mat,
+                                              CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+                AddChild(_spark);
+                ((SphereMesh)_spark.Mesh).Material = null;
+                _spark.GlobalPosition = To;
+            }
+            if (_spark != null)
+            {
+                float age = _t - arrive, size = Width(To) * 5 * Math.Max(0, 1 - age / .25f);
+                _spark.Scale = Vector3.One * Math.Max(.001f, size);
+                _spark.Visible = age < .25f;
+            }
+            if (_t > arrive + TrailFade) QueueFree();
+        }
     }
 
     /// <summary>A soft round puff texture for smoke, dust and mist (without it particles are hard squares).</summary>
