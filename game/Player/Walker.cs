@@ -5,8 +5,8 @@ using Godot;
 namespace DeadRecon.Player;
 
 /// <summary>
-/// First-person test walker. WASD move, Shift run, Ctrl crouch, Space jump, mouse look (click to capture, Esc to release),
-/// F toggles fly mode (no collision; Shift = fast, Space/C = up/down). Has health; guards can shoot it.
+/// First-person test walker. WASD move, Shift run, C crouch (toggle) or hold Alt, Space jump, mouse look (click to capture, Esc to release),
+/// F toggles fly mode (no collision; Shift = fast, Space/Ctrl = up/down). Has health; guards can shoot it.
 /// </summary>
 public partial class Walker : CharacterBody3D, IDamageable
 {
@@ -68,6 +68,7 @@ public partial class Walker : CharacterBody3D, IDamageable
     public bool Invulnerable { get; set; }
     public int HitsTaken { get; private set; }
     private AudioStreamPlayer? _thud;
+    private bool _crouchToggle;
 
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
@@ -105,6 +106,7 @@ public partial class Walker : CharacterBody3D, IDamageable
         else if (e is InputEventKey { Pressed: true, Echo: false } key)
         {
             if (key.PhysicalKeycode == Key.F && !Dead) SetFlying(!Flying);
+            if (key.PhysicalKeycode == Key.C && !Dead && !Flying) _crouchToggle = !_crouchToggle;
         }
         else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured && !Dead)
         {
@@ -146,12 +148,12 @@ public partial class Walker : CharacterBody3D, IDamageable
             var look = Camera.GlobalTransform.Basis;
             var move = look * new Vector3(input.X, 0, input.Y);
             if (Input.IsPhysicalKeyPressed(Key.Space)) move += Vector3.Up;
-            if (Input.IsPhysicalKeyPressed(Key.C)) move += Vector3.Down;
+            if (Input.IsPhysicalKeyPressed(Key.Ctrl)) move += Vector3.Down;
             GlobalPosition += move.LimitLength(1) * (fast ? FlyFast : FlySpeed) * dt;
             return;
         }
 
-        Crouching = Input.IsPhysicalKeyPressed(Key.Ctrl);
+        Crouching = _crouchToggle || Input.IsPhysicalKeyPressed(Key.Alt);
         _eye = Mathf.MoveToward(_eye, Crouching ? CrouchEye : EyeHeight, dt * 4);
         Camera.Position = new Vector3(0, _eye, 0);
         float speed = Crouching ? CrouchSpeed : fast ? RunSpeed : WalkSpeed;

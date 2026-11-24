@@ -73,7 +73,7 @@ public partial class PauseMenu : CanvasLayer
         Button(box, "Quit to desktop", () => GetTree().Quit());
         var help = new Label
         {
-            Text = "WASD move · Shift run · Ctrl crouch · Space jump · LMB fire · RMB scope · R reload · E (hold) take · N weather · T ground look",
+            Text = "WASD move · Shift run · C / Alt crouch · Space jump · LMB fire · RMB scope · R reload · E (hold) take · N weather · T ground look",
             AutowrapMode = TextServer.AutowrapMode.WordSmart, Modulate = new Color(1, 1, 1, .55f),
         };
         box.AddChild(help);
