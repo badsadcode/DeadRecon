@@ -5,7 +5,7 @@ using Godot;
 namespace DeadRecon.Player;
 
 /// <summary>
-/// First-person test walker. WASD move, Shift run, C crouch toggle (C while sprinting = slide; not Alt: Shift+Alt switches the Windows keyboard layout), Q/E lean, Space jump, mouse look (click to capture, Esc to release),
+/// First-person test walker. WASD move, Shift run, hold C crouch (C while sprinting = slide), Alt toggles crouch, Q/E lean, Space jump, mouse look (click to capture, Esc to release),
 /// F4 toggles fly mode (debug: no collision; Shift = fast, Space/Ctrl = up/down). Has health; guards can shoot it.
 /// </summary>
 public partial class Walker : CharacterBody3D, IDamageable
@@ -106,15 +106,15 @@ public partial class Walker : CharacterBody3D, IDamageable
         else if (e is InputEventKey { Pressed: true, Echo: false } key)
         {
             if (key.PhysicalKeycode == Key.F4 && !Dead) SetFlying(!Flying);
+            // C: hold to crouch (tapped mid-sprint it's a slide). Alt: toggle crouch.
             if (key.PhysicalKeycode == Key.C && !Dead && !Flying)
             {
-                // From a sprint, C is a slide that ends crouched; otherwise it toggles crouch.
                 // Sprinting = moving fast; "on the floor" with a little grace, because running over bumpy ground
                 // leaves the floor for a split second all the time.
                 var hv = new Vector2(Velocity.X, Velocity.Z).Length();
                 if (hv > 5.2f && _sinceFloor < .25f && _slide <= 0) StartSlide();
-                else _crouchToggle = !_crouchToggle;
             }
+            if (key.PhysicalKeycode == Key.Alt && !Dead && !Flying) _crouchToggle = !_crouchToggle;
         }
         else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured && !Dead)
         {
@@ -136,7 +136,7 @@ public partial class Walker : CharacterBody3D, IDamageable
     public float Lean => _lean;
     public bool Sliding => _slide > 0;
     private const float LeanOffset = .42f, LeanRoll = .2f, SlideTime = .85f, SlideSpeed = 9.5f;
-    private float _lean, _slide, _sinceFloor;
+    private float _lean, _slide, _sinceFloor, _eyeVel, _leanVel;
     private Vector3 _slideDir;
 
     private void StartSlide()
@@ -144,7 +144,6 @@ public partial class Walker : CharacterBody3D, IDamageable
         _slide = SlideTime;
         var h = new Vector3(Velocity.X, 0, Velocity.Z);
         _slideDir = h.LengthSquared() > .1f ? h.Normalized() : -Transform.Basis.Z;
-        _crouchToggle = true;                       // you end the slide crouched
         Hearing.Make(GlobalPosition, 9, this);      // gravel and leaves: a slide isn't silent
     }
 
@@ -195,14 +194,22 @@ public partial class Walker : CharacterBody3D, IDamageable
             return;
         }
 
-        Crouching = _crouchToggle || _slide > 0;
-        _eye = Mathf.MoveToward(_eye, _slide > 0 ? CrouchEye - .15f : Crouching ? CrouchEye : EyeHeight, dt * (_slide > 0 ? 7 : 4));
+        Crouching = _crouchToggle || _slide > 0 || Input.IsPhysicalKeyPressed(Key.C);
+        // Eye height on a critically damped spring: quick to start, eases into the end (a constant-speed move
+        // that stops dead felt abrupt in the playtest). Faster for a slide.
+        float eyeTarget = _slide > 0 ? CrouchEye - .15f : Crouching ? CrouchEye : EyeHeight;
+        float w = _slide > 0 ? 16 : 10;                      // spring frequency: ~90% there in ~0.4 s
+        _eyeVel += (w * w * (eyeTarget - _eye) - 2 * w * _eyeVel) * dt;
+        _eye += _eyeVel * dt;
 
         // Lean: hold Q (left) or E (right); not while sprinting or sliding.
         float want = (Input.IsPhysicalKeyPressed(Key.E) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.Q) ? 1 : 0);
         if (Running || _slide > 0) want = 0;
         if (want != 0) want *= LeanRoom(want);
-        _lean = Mathf.MoveToward(_lean, want, dt * 5);
+        const float lw = 12;                                   // same spring as the crouch: eases in and out
+        _leanVel += (lw * lw * (want - _lean) - 2 * lw * _leanVel) * dt;
+        _lean += _leanVel * dt;
+        if (Math.Abs(_lean) < .002f && want == 0) _lean = 0;
         Camera.Position = new Vector3(_lean * LeanOffset, _eye - Math.Abs(_lean) * .06f, 0);
         ApplyLook();
 

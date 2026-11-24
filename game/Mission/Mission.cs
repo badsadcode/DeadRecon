@@ -352,7 +352,7 @@ public partial class Mission : Node3D
                 $"Objective: take {IntelName} from the radio desk at a small enemy camp, about {campDist:0} m {Compass(Camp - Player.GlobalPosition)} of you. {_why}\n\n" +
                 $"Then get to the landing zone. Look for the green smoke.\n\n" +
                 $"Intel says one guard on patrol and one sentry by the radio. Both are reported to be in a bad mood.\n\n" +
-                "Tip: crouch (C) in the ferns. Rain covers your footsteps.\n\n" +
+                "Tip: crouch (hold C, or Alt to toggle) in the ferns. Rain covers your footsteps.\n\n" +
                 "Press any key to begin.";
         }
         else if (State == Phase.Complete)
