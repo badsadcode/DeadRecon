@@ -101,7 +101,7 @@ public partial class Hud : Control
             var p = centre + new Vector2(0, 70);
             DrawArc(p, 18, 0, MathF.Tau, 32, new Color(0, 0, 0, .4f), 4);
             if (Mission.SearchProgress > 0) DrawArc(p, 18, -MathF.PI / 2, -MathF.PI / 2 + MathF.Tau * Mission.SearchProgress, 32, Amber, 4);
-            Text(p + new Vector2(-200, 46), $"Hold E: take {Mission.IntelName}", 18, Ink, HorizontalAlignment.Center, 400);
+            Text(p + new Vector2(-200, 46), $"Hold F: take {Mission.IntelName}", 18, Ink, HorizontalAlignment.Center, 400);
         }
 
         DrawDetection(centre);

@@ -5,8 +5,8 @@ using Godot;
 namespace DeadRecon.Player;
 
 /// <summary>
-/// First-person test walker. WASD move, Shift run, C crouch (toggle) or hold Alt, Space jump, mouse look (click to capture, Esc to release),
-/// F toggles fly mode (no collision; Shift = fast, Space/Ctrl = up/down). Has health; guards can shoot it.
+/// First-person test walker. WASD move, Shift run, C crouch (toggle) or hold Alt (C while sprinting = slide), Q/E lean, Space jump, mouse look (click to capture, Esc to release),
+/// F4 toggles fly mode (debug: no collision; Shift = fast, Space/Ctrl = up/down). Has health; guards can shoot it.
 /// </summary>
 public partial class Walker : CharacterBody3D, IDamageable
 {
@@ -105,8 +105,13 @@ public partial class Walker : CharacterBody3D, IDamageable
         }
         else if (e is InputEventKey { Pressed: true, Echo: false } key)
         {
-            if (key.PhysicalKeycode == Key.F && !Dead) SetFlying(!Flying);
-            if (key.PhysicalKeycode == Key.C && !Dead && !Flying) _crouchToggle = !_crouchToggle;
+            if (key.PhysicalKeycode == Key.F4 && !Dead) SetFlying(!Flying);
+            if (key.PhysicalKeycode == Key.C && !Dead && !Flying)
+            {
+                // From a sprint, C is a slide that ends crouched; otherwise it toggles crouch.
+                if (Running && IsOnFloor() && _slide <= 0) StartSlide();
+                else _crouchToggle = !_crouchToggle;
+            }
         }
         else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured && !Dead)
         {
@@ -119,7 +124,41 @@ public partial class Walker : CharacterBody3D, IDamageable
     private void ApplyLook()
     {
         Rotation = new Vector3(0, _yaw, 0);
-        Camera.Rotation = new Vector3(_pitch, 0, _deathTilt);
+        Camera.Rotation = new Vector3(_pitch, 0, _deathTilt - _lean * LeanRoll);
+    }
+
+    // ---------------------------------------------------------------- lean and slide
+
+    /// <summary>-1 leaning left .. 1 leaning right (eased).</summary>
+    public float Lean => _lean;
+    public bool Sliding => _slide > 0;
+    private const float LeanOffset = .42f, LeanRoll = .2f, SlideTime = .85f, SlideSpeed = 9.5f;
+    private float _lean, _slide;
+    private Vector3 _slideDir;
+
+    private void StartSlide()
+    {
+        _slide = SlideTime;
+        var h = new Vector3(Velocity.X, 0, Velocity.Z);
+        _slideDir = h.LengthSquared() > .1f ? h.Normalized() : -Transform.Basis.Z;
+        _crouchToggle = true;                       // you end the slide crouched
+        Hearing.Make(GlobalPosition, 9, this);      // gravel and leaves: a slide isn't silent
+    }
+
+    /// <summary>
+    /// How far we can lean toward a side (0..1) before the head would go into a trunk or a slope:
+    /// lean as far as there's room, like peeking round a tree.
+    /// </summary>
+    private float LeanRoom(float side)
+    {
+        var head = GlobalPosition + Vector3.Up * _eye;
+        var to = head + Transform.Basis.X * side * (LeanOffset + .15f);
+        var q = PhysicsRayQueryParameters3D.Create(head, to);
+        q.Exclude = new Godot.Collections.Array<Rid> { GetRid() };
+        var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+        float room = hit.Count > 0 ? head.DistanceTo((Vector3)hit["position"]) - .15f : LeanOffset + .15f;
+        if (DeadRecon.World.Foliage.RaycastTrunk(head, to) is { } wood) room = Math.Min(room, wood.T * (LeanOffset + .15f) - .12f);
+        return Math.Clamp(room / LeanOffset, 0, 1);
     }
 
     public override void _PhysicsProcess(double delta)
@@ -153,12 +192,28 @@ public partial class Walker : CharacterBody3D, IDamageable
             return;
         }
 
-        Crouching = _crouchToggle || Input.IsPhysicalKeyPressed(Key.Alt);
-        _eye = Mathf.MoveToward(_eye, Crouching ? CrouchEye : EyeHeight, dt * 4);
-        Camera.Position = new Vector3(0, _eye, 0);
+        Crouching = _crouchToggle || Input.IsPhysicalKeyPressed(Key.Alt) || _slide > 0;
+        _eye = Mathf.MoveToward(_eye, _slide > 0 ? CrouchEye - .15f : Crouching ? CrouchEye : EyeHeight, dt * (_slide > 0 ? 7 : 4));
+
+        // Lean: hold Q (left) or E (right); not while sprinting or sliding.
+        float want = (Input.IsPhysicalKeyPressed(Key.E) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.Q) ? 1 : 0);
+        if (Running || _slide > 0) want = 0;
+        if (want != 0) want *= LeanRoom(want);
+        _lean = Mathf.MoveToward(_lean, want, dt * 5);
+        Camera.Position = new Vector3(_lean * LeanOffset, _eye - Math.Abs(_lean) * .06f, 0);
+        ApplyLook();
+
         float speed = Crouching ? CrouchSpeed : fast ? RunSpeed : WalkSpeed;
+        if (_lean != 0) speed = Math.Min(speed, CrouchSpeed);          // you shuffle while leaning
         var wish = (Transform.Basis * new Vector3(input.X, 0, input.Y)).LimitLength(1) * speed;
         Running = fast && !Crouching && wish.LengthSquared() > .1f;
+        if (_slide > 0)
+        {
+            // Momentum carries you; it bleeds off over the slide, steering a little with the keys.
+            _slide -= dt;
+            float k = Math.Max(0, _slide / SlideTime);
+            wish = (_slideDir * SlideSpeed * (.35f + .65f * k)) + wish * .15f;
+        }
         var v = Velocity;
         v.X = wish.X; v.Z = wish.Z;
         if (IsOnFloor()) { if (Input.IsPhysicalKeyPressed(Key.Space) && !Crouching) v.Y = JumpSpeed; }

@@ -92,7 +92,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -140,6 +140,8 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string moveTest = Arg("movetest", "");
+		if (moveTest != "") _ = RunMoveTest(moveTest);
 		string ragTest = Arg("ragdolltest", "");
 		if (ragTest != "") _ = RunRagdollTest(ragTest);
 		string charTest = Arg("chartest", "");
@@ -170,7 +172,7 @@ public partial class Main : Node3D
 			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space  C/Alt crouch   LMB fire  RMB aim  R reload   F: fly (Space/Ctrl up/down)   N: weather   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space  C/Alt crouch  Q/E lean   LMB fire  RMB aim  R reload   F: take  F4: fly (Space/Ctrl up/down)   N: weather   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
@@ -302,6 +304,68 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Movement check with real key presses: sprint, slide, lean in the open and against a trunk.</summary>
+	private async Task RunMoveTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}");
+		}
+		void Key(Godot.Key k, bool down) => Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = k, Keycode = k, Pressed = down });
+		_hud.Visible = false;
+		_weather.AutoChange = false;
+		foreach (var g in _guards) g.ProcessMode = ProcessModeEnum.Disabled;
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		await Seconds(.5);
+
+		// Sprint 1.2 s, then C.
+		var p0 = _walker.GlobalPosition;
+		Key(Godot.Key.Shift, true); Key(Godot.Key.W, true);
+		await Seconds(1.2);
+		var p1 = _walker.GlobalPosition;
+		GD.Print($"[move] sprint: {new Vector2(p1.X - p0.X, p1.Z - p0.Z).Length() / 1.2f:0.0} m/s, running {_walker.Running}");
+		Key(Godot.Key.C, true); await Frames(1); Key(Godot.Key.C, false);
+		await Frames(12);
+		await Shot("1_sliding");
+		await Seconds(1);
+		var p2 = _walker.GlobalPosition;
+		GD.Print($"[move] slide: {new Vector2(p2.X - p1.X, p2.Z - p1.Z).Length():0.0} m in ~1.2 s, now crouched {_walker.Crouching}, sliding {_walker.Sliding}");
+		Key(Godot.Key.Shift, false); Key(Godot.Key.W, false);
+		Key(Godot.Key.C, true); await Frames(1); Key(Godot.Key.C, false); // stand up
+		await Seconds(.5);
+		GD.Print($"[move] after C again: crouched {_walker.Crouching}");
+
+		// Lean right in the open.
+		Key(Godot.Key.E, true); await Seconds(.6);
+		GD.Print($"[move] lean right in the open: {_walker.Lean:0.00}");
+		await Shot("2_lean_right");
+		Key(Godot.Key.E, false); Key(Godot.Key.Q, true); await Seconds(.8);
+		GD.Print($"[move] lean left in the open: {_walker.Lean:0.00}");
+		await Shot("3_lean_left");
+		Key(Godot.Key.Q, false); await Seconds(.4);
+
+		// Stand with a trunk right at our right shoulder, lean into it.
+		var near = Foliage.TrunksNear(_walker.GlobalPosition, 30).OrderBy(t => new Vector2(t.X - _walker.GlobalPosition.X, t.Z - _walker.GlobalPosition.Z).Length()).FirstOrDefault(t => t.TrunkRadius > .2f);
+		var fwd = -_walker.GlobalTransform.Basis.Z; fwd.Y = 0; fwd = fwd.Normalized();
+		var right = fwd.Cross(Vector3.Up) * -1;
+		right = _walker.GlobalTransform.Basis.X; right.Y = 0; right = right.Normalized();
+		var spot = new Vector3(near.X, 0, near.Z) - right * (near.TrunkRadius + .45f);
+		_walker.GlobalPosition = new Vector3(spot.X, _world.HeightAt(spot.X, spot.Z) + .1f, spot.Z);
+		await Seconds(.3);
+		Key(Godot.Key.E, true); await Seconds(.6);
+		GD.Print($"[move] lean right into a trunk (r {near.TrunkRadius:0.00}): {_walker.Lean:0.00}");
+		Key(Godot.Key.E, false); Key(Godot.Key.Q, true); await Seconds(.6);
+		GD.Print($"[move] lean left away from it: {_walker.Lean:0.00}, camera roll {Mathf.RadToDeg(MathF.Asin(_walker.Camera.GlobalTransform.Basis.X.Y)):0} deg, eye offset {_walker.Camera.Position.X:0.00} m");
+		await Shot("4_peek_from_trunk");
+		Key(Godot.Key.Q, false);
 		GetTree().Quit();
 	}
 

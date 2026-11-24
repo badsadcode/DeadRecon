@@ -8,7 +8,7 @@ using Godot;
 namespace DeadRecon.Missions;
 
 /// <summary>
-/// The Milestone-0 operation: approach a camp, take the intel from its radio desk (hold E), reach extraction.
+/// The Milestone-0 operation: approach a camp, take the intel from its radio desk (hold F), reach extraction.
 /// Procedural operations, permanent geography: every run picks a new name and new places for the camp and the
 /// landing zone on the same baked map, chosen for being flat, dry and a sensible walk away.
 /// Usage: <see cref="Plan"/> before trees are planted (it marks clearings), then add the node.
@@ -278,7 +278,7 @@ public partial class Mission : Node3D
         if (State == Phase.Intel)
         {
             bool near = Player.GlobalPosition.DistanceTo(IntelAt) < 2.4f && !Player.Dead;
-            bool holding = near && Input.IsPhysicalKeyPressed(Key.E);
+            bool holding = near && Input.IsPhysicalKeyPressed(Key.F);
             SearchProgress = holding ? Math.Min(1, SearchProgress + dt / SearchTime) : Math.Max(0, SearchProgress - dt);
             if (SearchProgress >= 1) TakeIntel();
         }
@@ -324,7 +324,7 @@ public partial class Mission : Node3D
             Phase.Briefing => $"{OperationName}: read the briefing (any key)",
             Phase.Intel => $"OBJECTIVE: take {IntelName} from the camp radio desk   {d.Length():0} m {dir}" +
                            (SearchProgress > 0 ? $"   searching... {SearchProgress * 100:0}%" :
-                            Player.GlobalPosition.DistanceTo(IntelAt) < 2.4f ? "   hold E to take it" : ""),
+                            Player.GlobalPosition.DistanceTo(IntelAt) < 2.4f ? "   hold F to take it" : ""),
             Phase.Extract => $"OBJECTIVE: reach extraction (green smoke)   {Flat(d):0} m {dir}",
             Phase.Complete => $"{OperationName}: COMPLETE",
             _ => $"{OperationName}: FAILED",
