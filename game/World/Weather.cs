@@ -179,8 +179,9 @@ public partial class Weather : Node3D
         Cover.SetWetness(Wetness);
 
         // Sound: light rain is patter, heavy rain is a roar.
-        _patter.VolumeDb = r < .01f ? -80 : Mathf.LinearToDb(Math.Clamp(r * 2.2f, 0, 1) * (1 - r * .4f)) - 4;
-        _roar.VolumeDb = r < .3f ? -80 : Mathf.LinearToDb(Math.Clamp((r - .3f) / .7f, 0, 1)) - 2;
+        // ~11 dB quieter than the first version (playtest: too loud).
+        _patter.VolumeDb = r < .01f ? -80 : Mathf.LinearToDb(Math.Clamp(r * 2.2f, 0, 1) * (1 - r * .4f)) - 15;
+        _roar.VolumeDb = r < .3f ? -80 : Mathf.LinearToDb(Math.Clamp((r - .3f) / .7f, 0, 1)) - 13;
 
         // Gameplay: rain covers sounds.
         Hearing.Muffle = r;
@@ -281,29 +282,50 @@ public partial class Weather : Node3D
         return p;
     }
 
-    /// <summary>4 s seamless stereo loop: light = sparse bright drop ticks over soft hiss; heavy = dense dark roar.</summary>
+    /// <summary>
+    /// Seamless stereo loop: light = sparse bright drop ticks over a soft hiss; heavy = a dense dark roar with slow
+    /// swells. Generated a bit longer than the loop, then the extra tail is cross-faded over the start (equal power),
+    /// so the seam keeps full loudness instead of dipping. Odd lengths (7.3 s / 9.1 s) so the two layers never
+    /// line up into an obvious repeating pattern.
+    /// </summary>
     private static AudioStreamWav RainLoop(bool heavy)
     {
         const int Rate = 44100;
-        int n = Rate * 4;
-        var data = new byte[n * 4];
+        int n = (int)(Rate * (heavy ? 9.1f : 7.3f)), fade = Rate;          // 1 s overlap
+        var buf = new float[(n + fade) * 2];
         var rng = new Random(heavy ? 77 : 11);
-        float[] lp = new float[2], drop = new float[2], dropPhase = new float[2];
+        float[] lp = new float[2], lp2 = new float[2], drop = new float[2], dropPhase = new float[2], dropPitch = new float[2];
+        for (int i = 0; i < n + fade; i++)
+        {
+            float t = i / (float)Rate;
+            float swell = heavy ? .8f + .2f * MathF.Sin(t * .9f) * MathF.Sin(t * .37f + 1) : 1;
+            for (int ch = 0; ch < 2; ch++)
+            {
+                float noise = (float)rng.NextDouble() * 2 - 1;
+                lp[ch] += (noise - lp[ch]) * (heavy ? .1f : .35f);
+                lp2[ch] += (lp[ch] - lp2[ch]) * (heavy ? .25f : .6f);             // two poles: softer, less fizz
+                float hiss = lp2[ch] * (heavy ? 1.3f : .16f) * swell;
+                if (rng.NextDouble() < (heavy ? .003 : .0009))
+                {
+                    drop[ch] = (float)rng.NextDouble() * .6f + .2f; dropPhase[ch] = 0;
+                    dropPitch[ch] = (heavy ? 700 : 1700) + (float)rng.NextDouble() * (heavy ? 500 : 1400);
+                }
+                dropPhase[ch] += 1f / Rate;
+                float tik = drop[ch] * MathF.Sin(MathF.Tau * dropPitch[ch] * dropPhase[ch]) * MathF.Exp(-dropPhase[ch] * 220);
+                buf[i * 2 + ch] = hiss + tik * (heavy ? .22f : .35f);
+            }
+        }
+        var data = new byte[n * 4];
         for (int i = 0; i < n; i++)
         for (int ch = 0; ch < 2; ch++)
         {
-            float noise = (float)rng.NextDouble() * 2 - 1;
-            lp[ch] += (noise - lp[ch]) * (heavy ? .08f : .5f);
-            float hiss = lp[ch] * (heavy ? 1.6f : .18f);
-            // Individual drops: little decaying "tik"s at random moments.
-            if (rng.NextDouble() < (heavy ? .004 : .0012)) { drop[ch] = (float)rng.NextDouble() * .7f + .3f; dropPhase[ch] = 0; }
-            dropPhase[ch] += 1f / Rate;
-            float tik = drop[ch] * MathF.Sin(MathF.Tau * (heavy ? 900 : 2400) * dropPhase[ch]) * MathF.Exp(-dropPhase[ch] * 260);
-            float s = hiss + tik * (heavy ? .3f : .5f);
-            // Cross-fade the last 0.1 s into the start so the loop has no click.
-            float t = i / (float)n;
-            if (t > .975f) s *= (1 - t) / .025f;
-            if (t < .025f) s *= t / .025f;
+            float s = buf[i * 2 + ch];
+            if (i < fade)
+            {
+                // Start of the loop = start blended with what comes after the end: the seam is continuous.
+                float a = i / (float)fade;
+                s = s * MathF.Sin(a * MathF.PI / 2) + buf[(n + i) * 2 + ch] * MathF.Cos(a * MathF.PI / 2);
+            }
             short v = (short)(Math.Clamp(s, -1, 1) * 20000);
             data[(i * 2 + ch) * 2] = (byte)v; data[(i * 2 + ch) * 2 + 1] = (byte)(v >> 8);
         }

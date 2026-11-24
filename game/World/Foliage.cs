@@ -87,6 +87,25 @@ public static class Foliage
         return MathF.Exp(-depth);
     }
 
+    /// <summary>
+    /// Push a standing body (vertical capsule of <paramref name="radius"/> at <paramref name="pos"/>, feet) out of any
+    /// trunk it overlaps. Trunks aren't physics objects (there are ~700k of them), so movers call this after moving.
+    /// </summary>
+    public static Vector3 PushOut(Vector3 pos, float radius)
+    {
+        foreach (var p in TrunksNear(pos, radius + 1.2f))
+        {
+            if (pos.Y + 1.5f < p.BaseY || pos.Y > p.BaseY + p.TrunkTop) continue;
+            var d = new Vector2(pos.X - p.X, pos.Z - p.Z);
+            float min = radius + p.TrunkRadius, len = d.Length();
+            if (len >= min) continue;
+            d = len < 1e-4f ? Vector2.Right : d / len;
+            pos.X = p.X + d.X * min;
+            pos.Z = p.Z + d.Y * min;
+        }
+        return pos;
+    }
+
     /// <summary>True if the straight line a-b passes through this plant's trunk.</summary>
     public static bool Blocked(Vector3 a, Vector3 b, Plant p)
     {

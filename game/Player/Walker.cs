@@ -165,6 +165,7 @@ public partial class Walker : CharacterBody3D, IDamageable
         else v.Y -= Gravity * dt;
         Velocity = v;
         MoveAndSlide();
+        GlobalPosition = DeadRecon.World.Foliage.PushOut(GlobalPosition, .35f); // trunks are solid
 
         // Footsteps are audible to guards: running carries, sneaking barely does.
         if (IsOnFloor() && wish.LengthSquared() > .1f)

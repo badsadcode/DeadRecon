@@ -555,6 +555,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         Velocity = v;
         var before = GlobalPosition;
         MoveAndSlide();
+        GlobalPosition = DeadRecon.World.Foliage.PushOut(GlobalPosition, .35f); // trunks are solid
         if (speed > 0 && Flat(GlobalPosition - before) < speed * dt * .25f) _stuck += dt; else _stuck = 0;
 
         if (look is { } l)

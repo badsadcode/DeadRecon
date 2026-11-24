@@ -126,7 +126,7 @@ public partial class SoldierBody : Node3D
             var pb = new PhysicalBone3D
             {
                 Mass = p.Mass, JointType = p.Joint, Friction = .9f, Bounce = .05f,
-                LinearDamp = .3f, AngularDamp = 2.5f, CollisionLayer = 1 << 2, CollisionMask = 1,
+                LinearDamp = .6f, AngularDamp = 4f, CollisionLayer = 1 << 2, CollisionMask = 1,
             };
             // Capsule from this bone toward the next one (rest rotations are identity: the offset is the direction).
             Vector3 dir; float len;
@@ -160,6 +160,8 @@ public partial class SoldierBody : Node3D
             bodies.Add(pb);
         }
         sim.PhysicalBonesStartSimulation();
+        _ragdollBones = bodies;
+        _ragdollTime = 0;
         DropGun(shotDirection);
 
         // Shove one physics frame later: a brand-new body's mass isn't set up in its first frame (see the tree rocket).
@@ -173,9 +175,38 @@ public partial class SoldierBody : Node3D
                 if (d < best) { best = d; nearest = b; }
             }
             var dirFlat = shotDirection.Normalized();
-            nearest?.ApplyImpulse(dirFlat * 55 * push, hitPoint - nearest.GlobalPosition);
-            foreach (var b in bodies) if (IsInstanceValid(b)) b.ApplyCentralImpulse(dirFlat * 4 * push);
+            nearest?.ApplyImpulse(dirFlat * 30 * push, hitPoint - nearest.GlobalPosition);
+            foreach (var b in bodies) if (IsInstanceValid(b)) b.ApplyCentralImpulse(dirFlat * 2.5f * push);
         };
+    }
+
+    private List<PhysicalBone3D> _ragdollBones = new();
+    private float _ragdollTime;
+
+    /// <summary>
+    /// Keep the ragdoll calm. Limbs that start inside the slope get pushed out violently and then fight the joints;
+    /// so: cap speeds (nothing human falls faster than ~9 m/s or spins faster than ~12 rad/s), and once it has had
+    /// time to land, ramp the damping up until it lies still, then let it sleep.
+    /// </summary>
+    public override void _PhysicsProcess(double delta)
+    {
+        if (!Ragdolled || _ragdollBones.Count == 0) return;
+        _ragdollTime += (float)delta;
+        float settle = Math.Clamp((_ragdollTime - 1.5f) / 2.5f, 0, 1);     // 0 for 1.5 s, then up to 1 by 4 s
+        foreach (var b in _ragdollBones)
+        {
+            if (!IsInstanceValid(b)) continue;
+            if (b.LinearVelocity.Length() > 9) b.LinearVelocity = b.LinearVelocity.LimitLength(9);
+            if (b.AngularVelocity.Length() > 12) b.AngularVelocity = b.AngularVelocity.LimitLength(12);
+            b.LinearDamp = .6f + 14 * settle;
+            b.AngularDamp = 4 + 30 * settle;
+        }
+        if (_ragdollTime > 6)
+        {
+            // Done: stop paying for it. The bodies keep their pose; they just stop moving.
+            foreach (var b in _ragdollBones) if (IsInstanceValid(b)) { b.LinearVelocity = Vector3.Zero; b.AngularVelocity = Vector3.Zero; b.GravityScale = 0; }
+            _ragdollBones.Clear();
+        }
     }
 
     private void DropGun(Vector3 shotDirection)
