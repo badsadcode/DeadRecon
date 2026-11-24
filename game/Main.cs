@@ -366,6 +366,28 @@ public partial class Main : Node3D
 		GD.Print($"[move] lean left away from it: {_walker.Lean:0.00}, camera roll {Mathf.RadToDeg(MathF.Asin(_walker.Camera.GlobalTransform.Basis.X.Y)):0} deg, eye offset {_walker.Camera.Position.X:0.00} m");
 		await Shot("4_peek_from_trunk");
 		Key(Godot.Key.Q, false);
+
+		// Walk straight into trunks of different sizes; how close to the axis do we get?
+		foreach (float minR in new[] { .25f, .5f, .8f })
+		{
+			var t = Foliage.TrunksNear(_walker.GlobalPosition, 60).Where(x => x.TrunkRadius >= minR)
+				.OrderBy(x => new Vector2(x.X - _walker.GlobalPosition.X, x.Z - _walker.GlobalPosition.Z).Length()).FirstOrDefault();
+			if (t.TrunkRadius <= 0) { GD.Print($"[move] no trunk >= {minR}"); continue; }
+			var axis = new Vector3(t.X, 0, t.Z);
+			var start = axis + new Vector3(3, 0, 0);
+			_walker.GlobalPosition = new Vector3(start.X, _world.HeightAt(start.X, start.Z) + .2f, start.Z);
+			_walker.Look(90, 0); // face -X, toward the trunk
+			await Frames(3);
+			float closest = 99;
+			Key(Godot.Key.W, true);
+			for (int f = 0; f < 120; f++)
+			{
+				await ToSignal(GetTree(), SceneTree.SignalName.PhysicsFrame);
+				closest = Math.Min(closest, new Vector2(_walker.GlobalPosition.X - t.X, _walker.GlobalPosition.Z - t.Z).Length());
+			}
+			Key(Godot.Key.W, false);
+			GD.Print($"[move] walked into trunk r {t.TrunkRadius:0.00} (base y {t.BaseY:0.0}, top {t.TrunkTop:0.0}, me y {_walker.GlobalPosition.Y:0.0}): closest {closest:0.00} m from the axis (want >= {t.TrunkRadius + .35f:0.00})");
+		}
 		GetTree().Quit();
 	}
 

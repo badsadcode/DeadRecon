@@ -18,7 +18,8 @@ public static class Foliage
         float TrunkRadius, float TrunkTop,               // metres above BaseY; 0 radius = no trunk
         float LeafBottom, float LeafTop, float LeafRadius,
         float Density,                                   // optical depth per metre inside the leaves
-        object? Tag = null);                             // who placed it (trees: a handle TreeScatter understands)
+        object? Tag = null,                              // who placed it (trees: a handle TreeScatter understands)
+        float FootRadius = 0);                           // root flare at the ground, for walking into (0 = same as trunk)
 
     /// <summary>A bullet hit a trunk: (plant, hit point, bullet direction, damage). TreeScatter listens.</summary>
     public static event Action<Plant, Vector3, Vector3, float>? TrunkHit;
@@ -93,11 +94,11 @@ public static class Foliage
     /// </summary>
     public static Vector3 PushOut(Vector3 pos, float radius)
     {
-        foreach (var p in TrunksNear(pos, radius + 1.2f))
+        foreach (var p in TrunksNear(pos, radius + 2.5f))
         {
             if (pos.Y + 1.5f < p.BaseY || pos.Y > p.BaseY + p.TrunkTop) continue;
             var d = new Vector2(pos.X - p.X, pos.Z - p.Z);
-            float min = radius + p.TrunkRadius, len = d.Length();
+            float min = radius + Math.Max(p.TrunkRadius, p.FootRadius), len = d.Length();
             if (len >= min) continue;
             d = len < 1e-4f ? Vector2.Right : d / len;
             pos.X = p.X + d.X * min;
