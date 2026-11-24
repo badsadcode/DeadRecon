@@ -50,6 +50,14 @@ public partial class PauseMenu : CanvasLayer
         box.AddChild(_difficultyNote);
         UpdateNote();
 
+        var style = new OptionButton();
+        style.AddItem("Blocky");
+        style.AddItem("Smooth");
+        style.Selected = Settings.SoldierStyle == "smooth" ? 1 : 0;
+        style.ItemSelected += i => { Settings.SoldierStyle = i == 1 ? "smooth" : "blocky"; Settings.Save(); };
+        Row(box, "Soldier style", style);
+        box.AddChild(new Label { Text = "(soldier style applies from the next operation)", Modulate = new Color(1, 1, 1, .5f) });
+
         var sens = new HSlider { MinValue = .2, MaxValue = 3, Step = .05, Value = Settings.MouseSensitivity, CustomMinimumSize = new Vector2(220, 0) };
         var sensLabel = new Label { Text = $"{Settings.MouseSensitivity:0.00}x" };
         sens.ValueChanged += v => { Settings.MouseSensitivity = (float)v; sensLabel.Text = $"{v:0.00}x"; Settings.Save(); };

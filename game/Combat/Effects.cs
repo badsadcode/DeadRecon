@@ -168,6 +168,97 @@ public static class Effects
         return Wav(data, Rate);
     }
 
+    private static StandardMaterial3D? _mist, _drops;
+    private static AudioStreamWav? _thud;
+    private static GradientTexture2D? _puff;
+
+    /// <summary>
+    /// A bullet hits a person: a short puff of red mist blown along the shot, a few droplets, and a dull thud.
+    /// Kept brief and dark: readable feedback, not gore.
+    /// </summary>
+    public static void BloodHit(Node context, Vector3 at, Vector3 shotDir, bool sound = true)
+    {
+        var scene = context.GetTree().CurrentScene;
+        var dir = shotDir.LengthSquared() > 1e-6f ? shotDir.Normalized() : Vector3.Forward;
+        var side = Math.Abs(dir.Y) < .9f ? dir.Cross(Vector3.Up).Normalized() : dir.Cross(Vector3.Right).Normalized();
+        var basis = new Basis(side, dir, side.Cross(dir)); // particles' "up" = along the shot
+
+        _puff ??= SoftPuff();
+        _mist ??= new StandardMaterial3D
+        {
+            AlbedoTexture = _puff, AlbedoColor = new Color(.42f, .03f, .03f, .55f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
+            VertexColorUseAsAlbedo = true,
+        };
+        var fade = new Gradient();
+        fade.SetColor(0, new Color(1, 1, 1, 1));
+        fade.SetColor(1, new Color(1, 1, 1, 0));
+        var mist = new CpuParticles3D
+        {
+            Emitting = true, OneShot = true, Amount = 10, Lifetime = .45f, Explosiveness = .9f,
+            Direction = Vector3.Up, Spread = 28, InitialVelocityMin = .8f, InitialVelocityMax = 2.2f, Gravity = new Vector3(0, -.6f, 0),
+            ScaleAmountMin = .25f, ScaleAmountMax = .6f, Mesh = new QuadMesh { Size = new Vector2(.6f, .6f) }, MaterialOverride = _mist,
+            ColorRamp = fade, DampingMin = 3, DampingMax = 5,
+        };
+        scene.AddChild(mist);
+        mist.GlobalTransform = new Transform3D(basis, at);
+
+        _drops ??= new StandardMaterial3D
+        {
+            AlbedoColor = new Color(.3f, .02f, .02f), ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
+        };
+        var drops = new CpuParticles3D
+        {
+            Emitting = true, OneShot = true, Amount = 8, Lifetime = .6f, Explosiveness = 1,
+            Direction = Vector3.Up, Spread = 22, InitialVelocityMin = 2, InitialVelocityMax = 4, Gravity = new Vector3(0, -9.8f, 0),
+            ScaleAmountMin = .6f, ScaleAmountMax = 1.2f, Mesh = new QuadMesh { Size = new Vector2(.025f, .025f) }, MaterialOverride = _drops,
+        };
+        scene.AddChild(drops);
+        drops.GlobalTransform = new Transform3D(basis, at);
+        context.GetTree().CreateTimer(1).Timeout += () => { mist.QueueFree(); drops.QueueFree(); };
+
+        if (!sound) return;
+        _thud ??= Thud();
+        var p = new AudioStreamPlayer3D { Stream = _thud, UnitSize = 7, MaxDistance = 90, PitchScale = (float)GD.RandRange(.85, 1.1), VolumeDb = 3 };
+        scene.AddChild(p);
+        p.GlobalPosition = at;
+        p.Play();
+        p.Finished += p.QueueFree;
+    }
+
+    /// <summary>The thud for the player's own hits (not positional).</summary>
+    public static AudioStreamWav ThudSound() => _thud ??= Thud();
+
+    /// <summary>A heavy, dull impact: a low sine knock with a muffled noise burst.</summary>
+    private static AudioStreamWav Thud()
+    {
+        const int Rate = 44100;
+        int n = (int)(Rate * .22f);
+        var data = new byte[n * 2];
+        var rng = new Random(55);
+        float lp = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate;
+            lp += (((float)rng.NextDouble() * 2 - 1) - lp) * .08f;
+            float knock = MathF.Sin(MathF.Tau * (95 - 40 * t / .22f) * t) * MathF.Exp(-t * 22);
+            float s = Math.Clamp((knock * .9f + lp * 2.2f * MathF.Exp(-t * 40)) * Math.Min(1, t / .002f), -1, 1);
+            short v = (short)(s * 28000);
+            data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
+        }
+        return Wav(data, Rate);
+    }
+
+    private static GradientTexture2D SoftPuff()
+    {
+        var g = new Gradient();
+        g.SetColor(0, new Color(1, 1, 1, 1));
+        g.AddPoint(.5f, new Color(1, 1, 1, .45f));
+        g.SetColor(g.GetPointCount() - 1, new Color(1, 1, 1, 0));
+        return new GradientTexture2D { Gradient = g, Fill = GradientTexture2D.FillEnum.Radial, FillFrom = new Vector2(.5f, .5f), FillTo = new Vector2(1, .5f), Width = 64, Height = 64 };
+    }
+
     /// <summary>Additive star-shaped flash, camera-facing.</summary>
     public static StandardMaterial3D FlashMaterial()
     {

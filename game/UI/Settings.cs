@@ -12,6 +12,8 @@ public static class Settings
     public static float MouseSensitivity { get; set; } = 1;
     public static bool InvertY { get; set; }
     public static bool ShowDebug { get; set; }
+    /// <summary>Which BadCharacters set the guards use: a folder under assets/soldiers (blocky, smooth).</summary>
+    public static string SoldierStyle { get; set; } = "blocky";
 
     // What difficulty does to the guards.
     /// <summary>How far and how quickly guards notice you.</summary>
@@ -38,6 +40,7 @@ public static class Settings
         MouseSensitivity = Math.Clamp((float)cfg.GetValue("input", "sensitivity", 1f), .2f, 3f);
         InvertY = (bool)cfg.GetValue("input", "invert_y", false);
         ShowDebug = (bool)cfg.GetValue("ui", "debug", false);
+        SoldierStyle = (string)cfg.GetValue("game", "soldier_style", "blocky");
     }
 
     public static void Save()
@@ -47,6 +50,7 @@ public static class Settings
         cfg.SetValue("input", "sensitivity", MouseSensitivity);
         cfg.SetValue("input", "invert_y", InvertY);
         cfg.SetValue("ui", "debug", ShowDebug);
+        cfg.SetValue("game", "soldier_style", SoldierStyle);
         cfg.Save(Path);
     }
 }

@@ -92,7 +92,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -140,6 +140,10 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string ragTest = Arg("ragdolltest", "");
+		if (ragTest != "") _ = RunRagdollTest(ragTest);
+		string charTest = Arg("chartest", "");
+		if (charTest != "") _ = RunCharTest(charTest);
 		string hudTest = Arg("hudtest", "");
 		if (hudTest != "") _ = RunHudTest(hudTest);
 		string squadTest = Arg("squadtest", "");
@@ -186,7 +190,7 @@ public partial class Main : Node3D
 			_terrain.TextureMix = _terrain.TextureMix > .5f ? 0 : 1;
 		// Dead or done: Enter starts a new operation (same jungle, new camp; felled trees stay felled).
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _mission != null
-		    && (_walker.Dead || _mission.State == Mission.Phase.Complete))
+			&& (_walker.Dead || _mission.State == Mission.Phase.Complete))
 			GetTree().ReloadCurrentScene();
 	}
 
@@ -298,6 +302,124 @@ public partial class Main : Node3D
 		_weapon.ForceAim(false);
 		await CloseUp("d_down");
 		GD.Print($"[test] done: player {(_walker.Dead ? "dead" : $"alive ({_walker.Health:0})")}, guard {_guard.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Ragdoll check: shoot each guard from 8 m (hovering, so they stay calm), photograph hit, fall and rest.</summary>
+	private async Task RunRagdollTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_hud.Visible = false;
+		foreach (var h in FindChildren("*", nameof(DeadRecon.UI.Hud), true, false)) ((Control)h).Visible = false;
+		_weather.AutoChange = false;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = _mission.Camp + Vector3.Up * 30;
+		for (int f = 0; f < 1800 && (_trees.Pending > 0 || !_terrain.HasCollisionAt(_mission.Camp)); f++) await Frames(1);
+		await Seconds(2);
+		int n = 0;
+		foreach (var g in _guards)
+		{
+			n++;
+			// 8 m from him, on the side with no trunk in the way, eye height.
+			var gp = g.GlobalPosition;
+			Vector3 eyeAt = gp + new Vector3(8, 1.6f, 0);
+			for (int k = 0; k < 16; k++)
+			{
+				var c = gp + new Vector3(MathF.Cos(k * .39f) * 8, 0, MathF.Sin(k * .39f) * 8);
+				c.Y = _world.HeightAt(c.X, c.Z) + 1.6f;
+				if (Foliage.RaycastTrunk(c, gp + Vector3.Up * 1.2f) == null) { eyeAt = c; break; }
+			}
+			_walker.GlobalPosition = eyeAt - Vector3.Up * 1.65f;
+			bool head = n == 2;
+			var aim = g.GlobalPosition + Vector3.Up * (head ? 1.58f : 1.15f);
+			LookAt(aim);
+			await Frames(3);
+			_weapon.TestFire();
+			await Frames(2);
+			await Shot($"{n}_a_hit");
+			for (int k = 0; k < 6 && g.State != Guard.Mood.Dead; k++) { LookAt(g.GlobalPosition + Vector3.Up * 1.15f); await Frames(2); _weapon.TestFire(); await Seconds(.12); }
+			GD.Print($"[ragdoll] guard {n}: {g.State}");
+			await Seconds(.25);
+			LookAt(g.GlobalPosition + Vector3.Up * .9f);
+			await Frames(1);
+			await Shot($"{n}_b_falling");
+			await Seconds(2.5);
+			// Low and close, from the side.
+			var flat = (g.GlobalPosition - _walker.GlobalPosition); flat.Y = 0;
+			var sideDir = flat.Normalized().Cross(Vector3.Up);
+			var cam = g.GlobalPosition + sideDir * 3.2f - flat.Normalized() * 1.5f;
+			_walker.GlobalPosition = new Vector3(cam.X, _world.HeightAt(cam.X, cam.Z) - .7f, cam.Z);
+			LookAt(g.GlobalPosition + flat.Normalized() * .6f + Vector3.Up * .25f);
+			await Frames(3);
+			await Shot($"{n}_c_rest");
+		}
+		GetTree().Quit();
+	}
+
+	/// <summary>Character lineup: BadCharacters soldiers from assets/soldiers, in four poses, photographed.</summary>
+	private async Task RunCharTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[test] shot {name}");
+		}
+		_hud.Visible = false;
+		_weather.AutoChange = false;
+		foreach (var g in _guards) g.ProcessMode = ProcessModeEnum.Disabled;
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		var files = DeadRecon.AI.SoldierBody.Catalogue("res://assets/soldiers/blocky");
+		files.AddRange(DeadRecon.AI.SoldierBody.Catalogue("res://assets/soldiers/smooth").Take(4));
+		GD.Print($"[chars] {files.Count} characters");
+		// Stand them in a row in the camp clearing, facing a camera.
+		var c = _mission.Camp;
+		var bodies = new System.Collections.Generic.List<DeadRecon.AI.SoldierBody>();
+		for (int i = 0; i < files.Count; i++)
+		{
+			var b = new DeadRecon.AI.SoldierBody { CharacterScene = files[i] };
+			AddChild(b);
+			var at = c + new Vector3((i - (files.Count - 1) / 2f) * 1.25f, 0, -3);
+			b.GlobalPosition = new Vector3(at.X, _world.HeightAt(at.X, at.Z), at.Z);
+			b.RotationDegrees = new Vector3(0, 180, 0); // face +Z, toward the camera
+			bodies.Add(b);
+		}
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = new Vector3(c.X, _world.HeightAt(c.X, c.Z + 5) + 1.4f, c.Z + 5.5f);
+		_walker.Look(0, -4);
+		_weapon.Visible = false;
+		var poses = new (string name, float speed, float ready, float pitch, float crouch)[]
+		{
+			("1_relaxed", 0, 0, 0, 0), ("2_aiming", 0, 1, 0, 0), ("3_walking", 1.5f, .2f, 0, 0), ("4_cover", 0, 1, .1f, 1),
+		};
+		foreach (var (name, speed, ready, pitch, crouch) in poses)
+		{
+			foreach (var b in bodies) { b.Speed = speed; b.Ready = ready; b.AimPitch = pitch; b.Crouch = crouch; }
+			await Frames(40);
+			await Shot(name);
+		}
+		// A close side view of one, aiming.
+		foreach (var b in bodies) { b.Speed = 0; b.Ready = 1; b.Crouch = 0; }
+		var one = bodies[bodies.Count / 2];
+		_walker.GlobalPosition = one.GlobalPosition + new Vector3(2.2f, 1.3f, .9f);
+		_walker.Look(68, -8);
+		await Frames(20);
+		await Shot("5_side");
 		GetTree().Quit();
 	}
 
@@ -451,7 +573,7 @@ public partial class Main : Node3D
 		}
 		_weapon.ForceAim(false);
 		GD.Print($"[squad] 15 s of fight: patrol hiding {hidden * 100 / samples}%, peeking {peeking * 100 / samples}%, " +
-		         $"a trunk between us {wood * 100 / samples}% of the time; he hit me {_walker.HitsTaken - shotsAtMe} times; sentry: {sentry.State}");
+				 $"a trunk between us {wood * 100 / samples}% of the time; he hit me {_walker.HitsTaken - shotsAtMe} times; sentry: {sentry.State}");
 
 		// ---- 2. A body
 		sentry.TakeHit(500, sentry.GlobalPosition + Vector3.Up, sentry.GlobalPosition); // silently
@@ -622,7 +744,7 @@ public partial class Main : Node3D
 		{
 			_weather.SetNow(kind);
 			GD.Print($"[rain] {label}: running steps carry {Hearing.Carry(Hearing.RunningSteps):0.0} m (of {Hearing.RunningSteps}), walking {Hearing.Carry(Hearing.WalkingSteps):0.0} m, " +
-			         $"gunshot {Hearing.Carry(Hearing.Gunshot):0} m, tree crash {Hearing.Carry(140):0} m; guard sight x{_weather.SightFactor:0.00}");
+					 $"gunshot {Hearing.Carry(Hearing.Gunshot):0} m, tree crash {Hearing.Carry(140):0} m; guard sight x{_weather.SightFactor:0.00}");
 			foreach (var v in views)
 			{
 				_walker.SetFlying(v.fly);
@@ -770,7 +892,7 @@ public partial class Main : Node3D
 				if (crouch <= .12f) crouchHidden++;
 			}
 			GD.Print($"[cover] {dist,2:0} m: standing avg exposure {standSum / n * 100:0}% (fully hidden {standHidden * 100 / n}%), " +
-			         $"crouching avg {crouchSum / n * 100:0}% (fully hidden {crouchHidden * 100 / n}%)");
+					 $"crouching avg {crouchSum / n * 100:0}% (fully hidden {crouchHidden * 100 / n}%)");
 		}
 	}
 

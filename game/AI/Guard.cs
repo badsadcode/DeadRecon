@@ -463,7 +463,9 @@ public partial class Guard : CharacterBody3D, IDamageable
         bool headshot = at.Y - GlobalPosition.Y > 1.45f * (1 - .32f * _crouch);
         Health -= headshot ? damage * 3 : damage;
         GD.Print($"[guard] hit for {(headshot ? damage * 3 : damage):0}{(headshot ? " (headshot)" : "")}, health {Math.Max(Health, 0):0}");
-        if (Health <= 0) { Die(squashed: damage >= 60); return; } // only falling trees hit that hard
+        bool squashed = damage >= 60; // only falling trees hit that hard
+        if (!squashed) Effects.BloodHit(this, at, at - from);
+        if (Health <= 0) { Die(squashed, at, at - from); return; }
         _lastKnown = from;          // he felt where that came from
         EnterAlert();
         Bark("hurt");
@@ -482,9 +484,10 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (State is Mood.Alert or Mood.Investigate) { StartSearch(); _searchLeft = 10; }
     }
 
-    private void Die(bool squashed = false)
+    private void Die(bool squashed, Vector3 at, Vector3 shotDir)
     {
         Enter(Mood.Dead, squashed ? "squashed" : "dead");
+        _body?.Ragdoll(at, squashed ? Vector3.Down : shotDir, squashed ? 2 : 1);
         _deathTime = 0;
         _icon.Visible = false;
         GetChild<CollisionShape3D>(0).Disabled = true;
@@ -573,6 +576,21 @@ public partial class Guard : CharacterBody3D, IDamageable
     private void Animate(float dt)
     {
         float speed = new Vector2(Velocity.X, Velocity.Z).Length();
+        bool crouchWanted = State == Mood.Alert && InCover && !_peeking;
+        if (_body != null)
+        {
+            // The character animates itself; tell it what we're doing.
+            bool ready2 = State is Mood.Alert or Mood.Search or Mood.Investigate;
+            _crouch = Mathf.MoveToward(_crouch, crouchWanted ? 1 : 0, dt * 5);
+            _body.Speed = speed;
+            _body.Ready = Mathf.MoveToward(_body.Ready, ready2 ? 1 : 0, dt * 3);
+            _body.AimPitch = State == Mood.Alert && _seen ? _head.Rotation.X : 0;
+            _body.Crouch = _crouch;
+            var cap = (CapsuleShape3D)GetChild<CollisionShape3D>(0).Shape;
+            cap.Height = 1.8f - .58f * _crouch;
+            GetChild<CollisionShape3D>(0).Position = new Vector3(0, cap.Height * .5f, 0);
+            return;
+        }
         _walkPhase += dt * speed * 3.2f;
         float swing = MathF.Sin(_walkPhase) * Math.Min(speed / 2, 1) * .55f;
         _legL.Rotation = new Vector3(swing, 0, 0);
@@ -596,6 +614,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void Fall(float dt)
     {
+        if (_body is { Ragdolled: true }) return; // physics has him
         _deathTime += dt;
         float t = Math.Min(1, _deathTime / .7f);
         _rig.Rotation = new Vector3(-MathF.PI / 2 * t * t, 0, 0);   // topple backwards
@@ -655,6 +674,39 @@ public partial class Guard : CharacterBody3D, IDamageable
 
         _rig = new Node3D();
         AddChild(_rig);
+
+        // A BadCharacters soldier if there are any (assets/soldiers/<style>); the block man otherwise.
+        var characters = SoldierBody.Catalogue();
+        if (characters.Count > 0)
+        {
+            _body = new SoldierBody
+            {
+                // Own random source: looks must not change his patrol route or behaviour for a given seed.
+                CharacterScene = characters[(int)(Looks.Randi() % (uint)characters.Count)], GunScene = GunScene,
+            };
+            _rig.AddChild(_body);
+            _head = new Node3D { Position = new Vector3(0, 1.52f, 0) };   // aim/look helper, invisible
+            _legL = new Node3D(); _legR = new Node3D(); _gunPivot = new Node3D();
+            _rig.AddChild(_head); _rig.AddChild(_legL); _rig.AddChild(_legR); _rig.AddChild(_gunPivot);
+            _muzzle = _body.Muzzle;
+        }
+        else BuildBlockMan(olive, dark, skin, boots);
+
+        _flashLight = new OmniLight3D { LightColor = new Color(1, .75f, .4f), LightEnergy = 0, OmniRange = 7 };
+        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.35f, .35f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        (_muzzle ?? _gunPivot).AddChild(_flashLight);
+        (_muzzle ?? _gunPivot).AddChild(_flashSprite);
+        FinishBody();
+    }
+
+    private SoldierBody? _body;
+    public SoldierBody? Body => _body;
+    private RandomNumberGenerator Looks => _looks ??= new RandomNumberGenerator { Seed = (ulong)(Home.X * 92821 + Home.Z * 68917 + 7) };
+    private RandomNumberGenerator? _looks;
+
+    /// <summary>The original placeholder: boxes and capsules holding the rifle.</summary>
+    private void BuildBlockMan(Material olive, Material dark, Material skin, Material boots)
+    {
         Part(_rig, new BoxMesh { Size = new Vector3(.42f, .56f, .24f) }, olive, new Vector3(0, 1.22f, 0));          // torso
         Part(_rig, new BoxMesh { Size = new Vector3(.46f, .14f, .27f) }, dark, new Vector3(0, 1.32f, 0));           // webbing
         Part(_rig, new BoxMesh { Size = new Vector3(.38f, .16f, .22f) }, dark, new Vector3(0, .9f, 0));             // belt
@@ -680,10 +732,11 @@ public partial class Guard : CharacterBody3D, IDamageable
             _gunPivot.AddChild(gun);
             _muzzle = gun.FindChild("SOCKET_Muzzle", true, false) as Node3D;
         }
-        _flashLight = new OmniLight3D { LightColor = new Color(1, .75f, .4f), LightEnergy = 0, OmniRange = 7 };
-        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.35f, .35f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
-        (_muzzle ?? _gunPivot).AddChild(_flashLight);
-        (_muzzle ?? _gunPivot).AddChild(_flashSprite);
+    }
+
+    /// <summary>Sound and floating labels (same for either body).</summary>
+    private void FinishBody()
+    {
 
         _shot = new AudioStreamPlayer3D { Stream = Effects.Gunshot(), UnitSize = 12, MaxDistance = 700, VolumeDb = 2, MaxPolyphony = 4 };
         AddChild(_shot);

@@ -67,6 +67,7 @@ public partial class Walker : CharacterBody3D, IDamageable
     /// <summary>Tests only: hits still flash and count, but don't reduce health.</summary>
     public bool Invulnerable { get; set; }
     public int HitsTaken { get; private set; }
+    private AudioStreamPlayer? _thud;
 
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
@@ -75,6 +76,9 @@ public partial class Walker : CharacterBody3D, IDamageable
         if (Invulnerable) damage = 0;
         Health = Math.Max(0, Health - damage);
         HurtFlash = 1;
+        if (_thud == null) { _thud = new AudioStreamPlayer { Stream = DeadRecon.Combat.Effects.ThudSound(), VolumeDb = -4 }; AddChild(_thud); }
+        _thud.PitchScale = (float)GD.RandRange(.8, 1);
+        _thud.Play();
         // A little flinch toward the shot.
         AddRecoil(Mathf.DegToRad(1.5f), Mathf.DegToRad((float)GD.RandRange(-1.5, 1.5)));
         Hurt?.Invoke(damage, from);
