@@ -200,6 +200,7 @@ public partial class Kit : Node
     {
         string old = Loadout.Weapon;
         Loadout = Loadout with { Weapon = id };
+        DeadRecon.Base.HomeBase.AddToArmory(id);
         Loaded = Math.Min(rounds, Capacity);
         Changed?.Invoke(); LoadoutChanged?.Invoke(); Save();
         return old;

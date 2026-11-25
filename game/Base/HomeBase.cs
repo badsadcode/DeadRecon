@@ -40,8 +40,26 @@ public partial class HomeBase : Node3D
     };
 
     /// <summary>The saved state: where home is, what's built, how many operations you've done.</summary>
+    /// <summary>Someone you rescued: lives at home now.</summary>
+    public sealed class Soldier
+    {
+        public string Name { get; set; } = "";
+        public string Character { get; set; } = "";
+        public string Weapon { get; set; } = DeadRecon.Gear.WeaponDef.Default;
+        /// <summary>rest, guard, build.</summary>
+        public string Task { get; set; } = "rest";
+        /// <summary>Comes with you on the next operation.</summary>
+        public bool Squad { get; set; }
+        public bool Alive { get; set; } = true;
+    }
+
     public sealed class State
     {
+        public List<Soldier> Soldiers { get; set; } = new();
+        public List<Structures.Placed> Structures { get; set; } = new();
+        public int Stores { get; set; }
+        /// <summary>Guns you've brought home (handed out to your soldiers at the radio).</summary>
+        public List<string> Armory { get; set; } = new() { DeadRecon.Gear.WeaponDef.Default };
         public float X { get; set; }
         public float Z { get; set; }
         public float Yaw { get; set; }
@@ -81,7 +99,7 @@ public partial class HomeBase : Node3D
         var (gx, gz) = world.ToSample(at.X, at.Z);
         if (world.NearWater((int)gx, (int)gz, 3)) return "Too wet here. Somewhere drier.";
         var old = _state;
-        _state = new State { X = at.X, Z = at.Z, Yaw = yaw, Built = old?.Built ?? new(), Operations = old?.Operations ?? 0 };
+        _state = new State { X = at.X, Z = at.Z, Yaw = yaw, Built = old?.Built ?? new(), Operations = old?.Operations ?? 0, Soldiers = old?.Soldiers ?? new(), Structures = new(), Armory = old?.Armory ?? new() { DeadRecon.Gear.WeaponDef.Default } };
         Save();
         Current?.Rebuild();
         TreeScatter.Current?.ClearArea(new Vector2(at.X, at.Z), Radius + 4);
@@ -95,6 +113,28 @@ public partial class HomeBase : Node3D
         Save();
         Current?.Rebuild();
     }
+
+    public static void SaveNow() => Save();
+
+    /// <summary>A rescued soldier moves in. Joins the squad if there's room.</summary>
+    public static void AddSoldier(string name, string character)
+    {
+        if (_state == null || _state.Soldiers.Any(s => s.Name == name && s.Alive)) return;
+        int going = _state.Soldiers.Count(s => s.Alive && s.Squad);
+        _state.Soldiers.Add(new Soldier { Name = name, Character = character, Squad = going < 3 });
+        Save();
+    }
+
+    public static void AddToArmory(string weapon)
+    {
+        if (_state == null || _state.Armory.Contains(weapon)) return;
+        _state.Armory.Add(weapon);
+        Save();
+    }
+
+    /// <summary>Where builders should be working (plan mode's next unfinished blueprint), if anywhere.</summary>
+    public static Vector3? NextSite() => _nextSite?.Invoke();
+    public static Func<Vector3?>? _nextSite;
 
     public static void OperationDone()
     {
@@ -272,7 +312,7 @@ public partial class HomeBase : Node3D
             Hud.Prompt("F   Use the radio");
             if (fPressed) RadioScreen.Current?.Open();
         }
-        else if (Crate is { } crate && p.DistanceTo(crate) < 2.2f)
+        else if ((Crate is { } c0 && p.DistanceTo(c0) < 2.2f ? c0 : Structures.Nearest("crate", p, 2.2f)) is { } crate)
         {
             Hud.Prompt(Saved.CrateUsed ? "Supply crate: empty until your next operation" : "F   Restock magazines and dressings");
             if (fPressed && !Saved.CrateUsed && Kit.Current is { } kit)
@@ -288,7 +328,7 @@ public partial class HomeBase : Node3D
                 Hud.Toast($"Restocked: {mags} magazines filled, {dressings} dressings");
             }
         }
-        else if (Shelter is { } shelter && p.DistanceTo(shelter) < 2.4f)
+        else if ((Shelter is { } s0 && p.DistanceTo(s0) < 2.4f ? s0 : Structures.Nearest("shelter", p, 2.6f)) is { } shelter)
         {
             bool night = (TimeOfDay.Current?.Darkness ?? 0) > .5f;
             Hud.Prompt(night ? "F   Sleep until morning" : "Shelter (you can sleep here at night)");

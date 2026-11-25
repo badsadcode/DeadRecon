@@ -149,6 +149,19 @@ public partial class Hud : Control
         }
         string stance = Player.Flying ? "flying" : Player.Crouching ? "crouched" : Player.Running ? "running" : "standing";
         Text(hp + new Vector2(0, -12), $"{stance.ToUpper()}   ·   {Weather.Describe().ToUpper()}   ·   {TimeOfDay.Current?.Clock}", 14, Dim);
+        if (DeadRecon.People.Squad.Current is { Team.Count: > 0 } squad)
+        {
+            int row = 0;
+            foreach (var (key, c, picked) in squad.Status)
+            {
+                var y = hp + new Vector2(0, -40 - row * 20);
+                string state = c.Dead ? "KIA" : c.Down ? "DOWN" : c.Orders switch { DeadRecon.People.Comrade.Order.Hold => "holding", DeadRecon.People.Comrade.Order.Move => "moving", _ => "following" };
+                var col = c.Dead ? new Color(Ink, .3f) : c.Down ? Danger : picked ? Amber : new Color(.7f, .95f, .7f, .85f);
+                Text(y, $"{key}  {c.Person}   {state}{(c.FireAtWill && !c.Dead ? "  ·  weapons free" : "")}", 13, col);
+                row++;
+            }
+            if (squad.Picking) Text(hp + new Vector2(0, -40 - row * 20 - 4), "1 follow   2 hold   3 go there   4 weapons free / hold fire", 13, Amber);
+        }
         if (DeadRecon.Gear.Kit.Current is { } kit)
         {
             int dressings = kit.Medical;

@@ -148,7 +148,7 @@ public partial class Walker : CharacterBody3D, IDamageable
         }
         else if (e is InputEventKey { Pressed: true, Echo: false } key)
         {
-            if (key.PhysicalKeycode == Key.F4 && !Dead) SetFlying(!Flying);
+            if (key.PhysicalKeycode == Key.F10 && !Dead) SetFlying(!Flying);
             // C: hold to crouch (tapped mid-sprint it's a slide). Alt: toggle crouch.
             if (key.PhysicalKeycode == Key.C && !Dead && !Flying)
             {

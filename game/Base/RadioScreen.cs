@@ -88,6 +88,7 @@ public partial class RadioScreen : Control
             if (k.PhysicalKeycode == Key.Key1) _page = 0;
             if (k.PhysicalKeycode == Key.Key2) _page = 1;
             if (k.PhysicalKeycode == Key.Key3) _page = 2;
+            if (k.PhysicalKeycode == Key.Key4) _page = 3;
             QueueRedraw();
             GetViewport().SetInputAsHandled();
             return;
@@ -130,8 +131,8 @@ public partial class RadioScreen : Control
         DrawRect(new Rect2(Vector2.Zero, GetViewportRect().Size), new Color(.02f, .03f, .02f, .84f));
         DrawSetTransform(_offset, 0, Vector2.One * _scale);
         UiStyle.Text(this, new Vector2(70, 78), "FIELD RADIO", 34, UiStyle.Ink, bold: true);
-        string[] tabs = { "1   OPERATIONS", "2   BUILD", "3   RADIO LOG" };
-        for (int i = 0; i < 3; i++)
+        string[] tabs = { "1   OPERATIONS", "2   BUILD", "3   RADIO LOG", "4   SOLDIERS" };
+        for (int i = 0; i < 4; i++)
         {
             var r = new Rect2(330 + i * 200, 50, 190, 38);
             bool on = _page == i;
@@ -144,9 +145,9 @@ public partial class RadioScreen : Control
         int supplies = Kit.Current?.AllItems.Where(it => it.Def == ItemDef.Supplies).Sum(it => it.Count) ?? 0;
         UiStyle.Text(this, new Vector2(930, 78), $"BUILDING SUPPLIES: {supplies}   ·   OPERATIONS DONE: {HomeBase.Saved?.Operations ?? 0}", 14, UiStyle.Dim, HorizontalAlignment.Right, 600);
         DrawLine(new Vector2(70, 108), new Vector2(1530, 108), UiStyle.Faint, 1);
-        if (_page == 0) DrawOperations(); else if (_page == 1) DrawBuild(supplies); else DrawLog();
+        if (_page == 0) DrawOperations(); else if (_page == 1) DrawBuild(supplies); else if (_page == 2) DrawLog(); else DrawSoldiers();
         if (_messageAge < 3.5f) UiStyle.Text(this, new Vector2(0, 820), _message, 17, new Color(UiStyle.Amber, Math.Clamp(3.5f - _messageAge, 0, 1)), HorizontalAlignment.Center, RefW);
-        UiStyle.Text(this, new Vector2(70, 868), "Click to choose  ·  1-3: pages  ·  Tab or Esc: close", 13, UiStyle.Dim);
+        UiStyle.Text(this, new Vector2(70, 868), "Click to choose  ·  1-4: pages  ·  Tab or Esc: close", 13, UiStyle.Dim);
         DrawSetTransform(Vector2.Zero, 0, Vector2.One);
     }
 
@@ -183,38 +184,62 @@ public partial class RadioScreen : Control
 
     private void DrawBuild(int supplies)
     {
-        UiStyle.Text(this, new Vector2(70, 150), "Building supplies come from enemy camps (search their crates) and as pay for operations.", 16, UiStyle.Dim);
+        int builders = DeadRecon.People.Squad.Roster.Count(x => x.Task == "build" && !x.Squad);
+        UiStyle.Text(this, new Vector2(70, 150), $"Pick something, then place it at camp (plan mode). Builders: {builders}. Supplies come from enemy crates and as pay.", 16, UiStyle.Dim);
         int i = 0;
-        foreach (var b in HomeBase.Catalogue)
+        foreach (var b in Structures.Catalogue.Values)
         {
-            var r = new Rect2(70, 190 + i * 140, 1460, 120);
-            bool built = HomeBase.Has(b.Id), ready = b.Needs == null || HomeBase.Has(b.Needs);
-            DrawRect(r, built ? new Color(UiStyle.Olive, .35f) : UiStyle.Panel);
-            UiStyle.Text(this, r.Position + new Vector2(24, 44), b.Name.ToUpper(), 20, UiStyle.Ink, bold: true);
-            UiStyle.Text(this, r.Position + new Vector2(24, 76), b.What, 15, UiStyle.Dim);
-            string need = built ? "BUILT" : !ready ? $"needs the {HomeBase.Catalogue.First(x => x.Id == b.Needs).Name.ToLower()} first" : $"{b.Cost} supplies";
-            UiStyle.Text(this, r.Position + new Vector2(1100, 44), need, 16, built ? UiStyle.Good : supplies >= b.Cost && ready ? UiStyle.Ink : UiStyle.Dim, HorizontalAlignment.Right, 0);
-            if (!built)
-            {
-                var bb = b;
-                Button(new Rect2(r.Position + new Vector2(1130, 34), new Vector2(300, 50)), "BUILD", () =>
-                {
-                    if (Kit.Current is not { } kit) return;
-                    int left = bb.Cost;
-                    foreach (var it in kit.AllItems.Where(x => x.Def == ItemDef.Supplies).ToList())
-                    {
-                        int take = Math.Min(left, it.Count);
-                        it.Count -= take; left -= take;
-                        if (it.Count <= 0) kit.Remove(it);
-                        if (left == 0) break;
-                    }
-                    kit.Save();
-                    HomeBase.Build(bb.Id);
-                    Say($"{bb.Name}: built. (Trees in the way get cleared next time the jungle loads.)");
-                }, enabled: ready && supplies >= b.Cost, primary: true);
-            }
+            var r = new Rect2(70 + (i % 2) * 735, 185 + (i / 2) * 120, 715, 104);
+            DrawRect(r, UiStyle.Panel);
+            UiStyle.Text(this, r.Position + new Vector2(20, 36), b.Name.ToUpper(), 18, UiStyle.Ink, bold: true);
+            DrawMultilineString(UiStyle.Font, r.Position + new Vector2(20, 60), b.What, HorizontalAlignment.Left, 470, 14, -1, UiStyle.Dim);
+            int count = Structures.All.Count(p => p.Id == b.Id);
+            UiStyle.Text(this, r.Position + new Vector2(500, 36), $"{b.Cost} supplies{(count > 0 ? $"  ·  {count} at camp" : "")}", 14, supplies >= b.Cost ? UiStyle.Ink : UiStyle.Dim);
+            var bb = b;
+            Button(new Rect2(r.Position + new Vector2(500, 52), new Vector2(195, 40)), "PLAN", () => { Close(); Structures.Current?.Plan(bb.Id); }, enabled: supplies >= b.Cost, primary: true);
             i++;
         }
+    }
+
+    private void DrawSoldiers()
+    {
+        var roster = DeadRecon.People.Squad.Roster.ToList();
+        if (roster.Count == 0)
+        {
+            UiStyle.Text(this, new Vector2(70, 160), "Nobody here but you. Rescue prisoners (an operation on page 1) and they'll join your camp.", 16, UiStyle.Dim);
+            return;
+        }
+        int going = roster.Count(x => x.Squad);
+        UiStyle.Text(this, new Vector2(70, 150), $"Your people. Up to {DeadRecon.People.Squad.Max} come with you on the next operation ({going} picked). The rest do their jobs here.", 16, UiStyle.Dim);
+        var armory = HomeBase.Saved?.Armory ?? new List<string>();
+        int i = 0;
+        foreach (var s in roster)
+        {
+            var r = new Rect2(70, 185 + i * 76, 1460, 66);
+            DrawRect(r, s.Squad ? new Color(UiStyle.Olive, .35f) : UiStyle.Panel);
+            UiStyle.Text(this, r.Position + new Vector2(20, 40), s.Name, 18, UiStyle.Ink, bold: true);
+            var soldier = s;
+            int row = i;
+            Button(new Rect2(r.Position + new Vector2(360, 13), new Vector2(240, 40)), s.Squad ? "COMING WITH YOU" : "STAYS AT CAMP", () =>
+            {
+                if (!soldier.Squad && roster.Count(x => x.Squad) >= DeadRecon.People.Squad.Max) { Say($"The squad's full ({DeadRecon.People.Squad.Max})."); return; }
+                soldier.Squad = !soldier.Squad; HomeBase.SaveNow();
+            }, primary: s.Squad);
+            string[] tasks = { "rest", "guard", "build" };
+            Button(new Rect2(r.Position + new Vector2(620, 13), new Vector2(220, 40)), $"JOB: {s.Task.ToUpper()}", () =>
+            {
+                soldier.Task = tasks[(Array.IndexOf(tasks, soldier.Task) + 1) % tasks.Length]; HomeBase.SaveNow();
+                foreach (var c in DeadRecon.People.Comrade.All.Where(c => c.Person == soldier.Name && c.Orders == DeadRecon.People.Comrade.Order.Base))
+                { c.Task = soldier.Task; c.Post = DeadRecon.People.Squad.PostFor(soldier, row); }
+            });
+            Button(new Rect2(r.Position + new Vector2(860, 13), new Vector2(420, 40)), $"GUN: {WeaponDef.Get(s.Weapon).Name.ToUpper()}", () =>
+            {
+                int at = armory.IndexOf(soldier.Weapon);
+                soldier.Weapon = armory.Count > 0 ? armory[(at + 1) % armory.Count] : soldier.Weapon; HomeBase.SaveNow();
+            }, enabled: armory.Count > 1);
+            i++;
+        }
+        UiStyle.Text(this, new Vector2(70, 185 + i * 76 + 30), "Guns: any gun you've carried home is in the armory. Squad orders in the field: F1-F3 one, F4 all, then 1 follow · 2 hold · 3 go there · 4 weapons free/hold fire.", 14, UiStyle.Dim);
     }
 
     private void DrawLog()

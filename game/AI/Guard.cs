@@ -324,6 +324,7 @@ public partial class Guard : CharacterBody3D, IDamageable
             case Mood.Patrol:
             {
                 if (Suspicion >= .3f) { _sitting = 0; Enter(Mood.Suspicious, "suspicious"); return (here, 0, _lastKnown); }
+                if (VisibleComrade(30) is { } stranger) { _sitting = 0; _lastKnown = stranger.GlobalPosition; EnterAlert(); Bark("alert"); return (here, 0, stranger.GlobalPosition); }
                 _mutter -= dt;
                 if (_mutter <= 0) { _mutter = _rng.RandfRange(16, 30); Bark(Sentry ? "sentry" : "mutter"); }
                 TryChat(dt);
@@ -423,6 +424,14 @@ public partial class Guard : CharacterBody3D, IDamageable
                     }
                     if (_sinceSeen < 10) return (spot, InvestigateSpeed, _lastKnown);   // hiding, waiting to peek
                     _cover = null;                                                       // he's been quiet too long: go look
+                }
+                // Can't see you, but one of your soldiers is right there: him, then.
+                if (!_seen && VisibleComrade(70) is { } foe)
+                {
+                    _lastKnown = foe.GlobalPosition;
+                    _cooldown -= dt;
+                    if (_cooldown <= 0) ShootAt(foe);
+                    return (here, 0, foe.GlobalPosition);
                 }
                 if (_seen)
                 {
@@ -699,6 +708,50 @@ public partial class Guard : CharacterBody3D, IDamageable
     }
 
     // ================================================================= shooting
+
+    private float _comradeCheck;
+    private DeadRecon.People.Comrade? _comradeSeen;
+
+    /// <summary>One of the player's soldiers he can see (cheap: checked a few times a second).</summary>
+    private DeadRecon.People.Comrade? VisibleComrade(float range)
+    {
+        _comradeCheck -= (float)GetPhysicsProcessDeltaTime();
+        if (_comradeCheck > 0) return _comradeSeen is { Down: false, Dead: false } c && IsInstanceValid(c) ? c : null;
+        _comradeCheck = .4f;
+        _comradeSeen = null;
+        var eye = GlobalPosition + Vector3.Up * EyeHeight;
+        foreach (var c in DeadRecon.People.Comrade.All)
+        {
+            if (c.Down || c.Dead || c.Orders == DeadRecon.People.Comrade.Order.Base) continue;
+            float d = eye.DistanceTo(c.Chest);
+            if (d > range * (Weather.Current?.SightFactor ?? 1)) continue;
+            var forward = -GlobalTransform.Basis.Z;
+            if (forward.Dot((c.Chest - eye).Normalized()) < -.2f && d > 8) continue;   // not behind him
+            var q = PhysicsRayQueryParameters3D.Create(eye, c.Chest);
+            q.Exclude = new Godot.Collections.Array<Rid> { GetRid() };
+            var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+            if (hit.Count > 0 && hit["collider"].AsGodotObject() != c) continue;
+            if (Foliage.RaycastTrunk(eye, c.Chest) != null || Foliage.Transmission(eye, c.Chest) < .3f) continue;
+            _comradeSeen = c;
+            break;
+        }
+        return _comradeSeen;
+    }
+
+    private void ShootAt(DeadRecon.People.Comrade c)
+    {
+        if (_burst <= 0) _burst = _rng.RandiRange(2, 4);
+        _burst--;
+        _cooldown = _burst > 0 ? .22f : _rng.RandfRange(1.1f, 2f);
+        _flash = 0;
+        _shot.PitchScale = .95f + _rng.Randf() * .1f;
+        _shot.Play();
+        var eye = GlobalPosition + Vector3.Up * EyeHeight;
+        var from = _muzzle?.GlobalPosition ?? eye;
+        float chance = Math.Clamp(.5f * (1 - eye.DistanceTo(c.Chest) / 90), .05f, .5f) * DeadRecon.UI.Settings.GuardAccuracy;
+        if (_rng.Randf() < chance) { Effects.Tracer(this, from, c.Chest, enemy: true); c.TakeHit(ShotDamage * _rng.RandfRange(.6f, 1f), c.Chest, eye); }
+        else Effects.Tracer(this, from, c.Chest + new Vector3(_rng.RandfRange(-2, 2), _rng.RandfRange(-1, 1.5f), _rng.RandfRange(-2, 2)), enemy: true);
+    }
 
     private void Shoot()
     {

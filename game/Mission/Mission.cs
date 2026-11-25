@@ -621,7 +621,10 @@ public partial class Mission : Node3D
             // He sits by your fire (or waits at the landing zone) until the next operation picks him up.
             var spot = HomeBase.Current?.Radio is { } radio && ExtractHome ? radio + new Vector3(-2.2f, 0, 3.2f) : Extraction + new Vector3(2, 0, 2);
             _prisoner.Rest(spot with { Y = World.HeightAt(spot.X, spot.Z) });
+            HomeBase.AddSoldier(_prisonerName, _prisoner.CharacterScene);
+            DeadRecon.UI.Hud.Toast($"{_prisonerName} joins your camp");
         }
+        if (ExtractHome) DeadRecon.People.Squad.Current?.StandDown();
         int reward = Reward(Kind);
         if (reward > 0 && Kit.Current is { } kit)
         {

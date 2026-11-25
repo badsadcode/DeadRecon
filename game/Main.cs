@@ -37,6 +37,7 @@ public partial class Main : Node3D
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
 	private Rocks? _rocks;
+	private DeadRecon.People.Squad? _squadNode;
 	private DeadRecon.Gear.Kit _kit = null!;
 	private DeadRecon.UI.KitScreen _kitScreen = null!;
 	private DeadRecon.AI.Patrols? _patrols;
@@ -69,7 +70,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -152,6 +153,9 @@ public partial class Main : Node3D
 		_villages = new Villages { World = _world, Towns = _towns, Viewer = _walker };
 		AddChild(_villages);
 		AddChild(new DeadRecon.Base.HomeBase { Player = _walker, World = _world });
+		_squadNode = new DeadRecon.People.Squad { Player = _walker, World = _world, OnOperation = op != Mission.Op.None };
+		AddChild(_squadNode);
+		AddChild(new DeadRecon.Base.Structures { Player = _walker, World = _world });
 		_rocks = new Rocks { World = _world, Viewer = _walker };
 		AddChild(_rocks);
 
@@ -333,6 +337,8 @@ public partial class Main : Node3D
 		if (gunTest != "") _ = RunGunTest(gunTest);
 		string baseTest = Arg("basetest", "");
 		if (baseTest != "") _ = RunBaseTest(baseTest);
+		string sbTest = Arg("squadbasetest", "");
+		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
 		if (opTest != "") _ = RunOpTest(opTest);
 		string jobTest = Arg("jobtest", "");
@@ -377,7 +383,7 @@ public partial class Main : Node3D
 			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take/talk/search  Tab: kit  M: map  H: dressing  L: light  F4: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take/talk/search  Tab: kit  M: map  H: dressing  L: light  F10: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
@@ -385,7 +391,7 @@ public partial class Main : Node3D
 
 	public override void _UnhandledInput(InputEvent e)
 	{
-		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F3 } && _hud != null)
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F9 } && _hud != null)
 		{
 			DeadRecon.UI.Settings.ShowDebug = !DeadRecon.UI.Settings.ShowDebug;
 			DeadRecon.UI.Settings.Save();
@@ -851,6 +857,84 @@ public partial class Main : Node3D
 		for (int page = 0; page < 3; page++) { radio.Open(page); await Frames(5); await Shot($"4_radio_page{page + 1}"); }
 		radio.Close();
 		foreach (var (kind, opSeed) in DeadRecon.Base.RadioScreen.Offers()) GD.Print($"[base] offer: {Mission.NameFor(opSeed)}: {Mission.Describe(kind)}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Your people: set up home, three rescued soldiers move in (two in the squad, one builder), plan a tent
+	/// and watch it go up, then take the squad into the enemy camp, weapons free.</summary>
+	private async Task RunSquadBaseTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[sb] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		// Home: 300 m from the camp, away from it.
+		var away = (_spawn.position - _mission.Camp) with { Y = 0 };
+		Vector3 home = _spawn.position;
+		for (int k = 0; k < 24; k++)
+		{
+			var at = _mission.Camp + away.Normalized().Rotated(Vector3.Up, k * .5f) * (300 + k * 10);
+			at.Y = _world.HeightAt(at.X, at.Z);
+			if (DeadRecon.Base.HomeBase.Establish(at, 0, _world) == null) { home = at; break; }
+		}
+		var faces = DeadRecon.AI.SoldierBody.Catalogue();
+		foreach (var n in new[] { "Sergeant Okafor", "Private Santos", "Corporal Tran" }) DeadRecon.Base.HomeBase.AddSoldier(n, faces[Math.Abs(n.GetHashCode()) % faces.Count]);
+		var roster = DeadRecon.Base.HomeBase.Saved!.Soldiers;
+		roster[2].Squad = false; roster[2].Task = "build";
+		roster[0].Weapon = "lmg_7741"; roster[1].Weapon = "rifle_4121";
+		var siteAt = home + new Vector3(5, 0, 3);
+		DeadRecon.Base.Structures.Current!.TestPlace("tent", siteAt);
+		_walker.GlobalPosition = home + new Vector3(0, 1, 6);
+		_squadNode!.OnOperation = true;
+		_squadNode.Muster();
+		await Seconds(2);
+		GD.Print($"[sb] home {home}; squad {_squadNode.Team.Count}, at home {_squadNode.AtHome.Count}; tent {DeadRecon.Base.Structures.Progress("tent") * 100:0}%");
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		_walker.GlobalPosition = home + new Vector3(-6, 3, 12);
+		LookAt(home + new Vector3(3, 0, 3));
+		await Seconds(8);
+		await Shot("1_camp_building");
+		GD.Print($"[sb] after 10 s: tent {DeadRecon.Base.Structures.Progress("tent") * 100:0}%");
+		await Seconds(25);
+		GD.Print($"[sb] after 35 s: tent {DeadRecon.Base.Structures.Progress("tent") * 100:0}%");
+		await Shot("2_camp_later");
+		// Off to the camp: walk the squad there (fly ahead, they catch up), then weapons free.
+		foreach (var g in _guards) { g.SetPhysicsProcess(true); g.SetProcess(true); }
+		var near = _mission.Camp + away.Normalized() * 45;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = near + Vector3.Up * 30;
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(near)); f++) await Frames(1);
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = near with { Y = _world.HeightAt(near.X, near.Z) + .5f };
+		LookAt(_mission.Camp);
+		await Seconds(3);
+		foreach (var c in _squadNode.Team) c.Command(DeadRecon.People.Comrade.Order.Move, _mission.Camp + (near - _mission.Camp).Normalized() * 25);
+		await Seconds(6);
+		await Shot("3_squad_moving");
+		foreach (var c in _squadNode.Team) c.SetFire(true);
+		_walker.Flying.ToString();
+		for (int t = 0; t < 40; t++)
+		{
+			await Seconds(1);
+			if (t == 8) await Shot("4_firefight");
+		}
+		int dead = _mission.Guards.Count(g => g.State == Guard.Mood.Dead);
+		GD.Print($"[sb] firefight: guards down {dead}/{_mission.Guards.Count}; squad: {string.Join(", ", _squadNode.Team.Select(c => $"{c.Person} {(c.Dead ? "dead" : c.Down ? "down" : $"{c.Health:0} hp")}"))}");
 		GetTree().Quit();
 	}
 
