@@ -48,6 +48,9 @@ public partial class TreeScatter : Node3D
     }
 
     /// <summary>Weather: wet bark and leaves are darker and glossier.</summary>
+    /// <summary>Other materials that should get darker and shinier in the rain (village walls, roofs...).</summary>
+    public static void RegisterWet(BaseMaterial3D m) => WetMaterials.Add((m, m.Roughness, m.AlbedoColor));
+
     public void SetWetness(float wet)
     {
         foreach (var (mat, rough, albedo) in WetMaterials)
@@ -238,6 +241,7 @@ public partial class TreeScatter : Node3D
                 int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
                 float y = World.Ground(gx, gz);
                 if (y > MaxHeight || World.NearWater(gx, gz, 2) || InClearing(x, z)) continue;
+                if (Settlements.Current?.KeepClear(x, z, 2.5f) == true) continue;   // roads and villages
                 float dx = World.Ground(gx + 1, gz) - World.Ground(gx - 1, gz), dz = World.Ground(gx, gz + 1) - World.Ground(gx, gz - 1);
                 float ny = 1 / MathF.Sqrt(1 + (dx * dx + dz * dz) / (4 * World.Spacing * World.Spacing));
                 if (ny < MaxSlopeNormalY) continue;

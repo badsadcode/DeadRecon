@@ -75,6 +75,14 @@ public partial class TerrainStreamer : Node3D
         }
         HasTextures = all;
         if (!all) GD.PushWarning("Some ground textures are missing from res://assets/textures; using the painted ground.");
+        if (Settlements.Current?.Mask is { } mask)
+        {
+            ground.SetShaderParameter("settle_mask", ImageTexture.CreateFromImage(mask));
+            ground.SetShaderParameter("has_settle", true);
+            ground.SetShaderParameter("settle_half", World.Half);
+            ground.SetShaderParameter("settle_spacing", World.Spacing);
+            ground.SetShaderParameter("settle_px", (float)mask.GetWidth());
+        }
         _groundMaterial = ground;
         TextureMix = all ? 1 : 0;
         _waterMaterial = new StandardMaterial3D

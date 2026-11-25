@@ -81,7 +81,7 @@ public static class Synth
 
     // ================================================================= footsteps
 
-    public enum Surface { Leaves, Mud, Water }
+    public enum Surface { Leaves, Mud, Water, Dirt, Wood }
 
     /// <summary>One footstep (several variants per surface so a walk doesn't sound like a metronome).</summary>
     public static AudioStreamWav Step(Surface surface, int variant) => Cached($"step{surface}{variant}", () =>
@@ -118,6 +118,31 @@ public static class Synth
                     float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
                     ph += MathF.Tau * (220 - 120 * t / .2f + 25 * MathF.Sin(t * 90)) / Rate;
                     s[i] = (MathF.Sin(ph) * .6f + lp.Run(noise) * 1.6f) * MathF.Exp(-t * 18) * Math.Min(1, t * 300);
+                }
+                break;
+            }
+            case Surface.Dirt:
+            {
+                // Packed earth: a firm thump with a little grit scuffing under the sole.
+                var thud = Biquad.LowPass(320); var grit = Biquad.BandPass(3800, .9f);
+                for (int i = 0; i < n; i++)
+                {
+                    float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
+                    s[i] = thud.Run(noise) * 6.5f * MathF.Exp(-t * 38) + grit.Run(noise) * .5f * MathF.Exp(-t * 22) * Math.Min(1, t * 200);
+                }
+                break;
+            }
+            case Surface.Wood:
+            {
+                // Planks: a hollow knock (two resonances) and a soft creak.
+                float f1 = 180 + rng.Next(40), f2 = 410 + rng.Next(80), ph1 = 0, ph2 = 0;
+                var lp = Biquad.LowPass(900);
+                for (int i = 0; i < n; i++)
+                {
+                    float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
+                    ph1 += MathF.Tau * f1 / Rate; ph2 += MathF.Tau * f2 / Rate;
+                    s[i] = (MathF.Sin(ph1) * .9f * MathF.Exp(-t * 30) + MathF.Sin(ph2) * .45f * MathF.Exp(-t * 45)) * Math.Min(1, t * 400)
+                         + lp.Run(noise) * 2.5f * MathF.Exp(-t * 60);
                 }
                 break;
             }

@@ -91,11 +91,13 @@ night. Darkness is a stealth tool like rain.
 
 ## Build order (proposal)
 
-1. **Atmosphere: day/night, light and mist.** Quick, transforms the mood. *(in progress)*
+1. **Atmosphere: day/night, light and mist.** Quick, transforms the mood. *(done; clouds still to come)*
 2. **Roads and settlement sites in the world bake.** Fills the empty `Sites`/`Roads` slots in the generator: trails,
-   dirt roads, bridges and fords, hamlet/village/town sites, outpost sites.
+   dirt roads, bridges and fords, hamlet/village/town sites, outpost sites. *(done: `tools/WorldBaker/Settler.cs`;
+   also rice paddies and wheat fields round every settlement. Bridges are marked but not built yet.)*
 3. **Buildings.** Stilt houses, shophouses, temple, concrete outpost. Via the studio's building generator
-   (BadBuilding → NoorArchitect) where possible, exported to Noor Interchange.
+   (BadBuilding → NoorArchitect) where possible, exported to Noor Interchange. *(placeholder procedural stilt houses,
+   huts, wells, stalls and checkpoints in `game/World/Villages.cs` until NoorArchitect exports exist)*
 4. **One village, alive.** Villagers with daily routines, a headman, support value, one or two local jobs.
 5. **Roaming patrols** between sites, simulated cheaply off-screen, real near you.
 6. **The map and its memory.** A map screen with what you've discovered, site ownership, village support; persistence

@@ -93,6 +93,9 @@ public partial class Mission : Node3D
             var p = from + new Vector3(MathF.Cos(a) * r, 0, MathF.Sin(a) * r);
             if (Math.Abs(p.X) > World.Half - 60 || Math.Abs(p.Z) > World.Half - 60) continue;
             if (avoid is { } av && new Vector2(p.X - av.X, p.Z - av.Z).Length() < 130) continue;
+            // Not in a village, not across a road.
+            if (Settlements.Current is { } towns && (towns.NearRoad(p.X, p.Z, radius + 4) ||
+                towns.Sites.Exists(s => new Vector2(p.X - s.Centre.X, p.Z - s.Centre.Z).Length() < s.Radius + radius + 60))) continue;
             float lo = float.MaxValue, hi = float.MinValue; bool wet = false;
             for (int i = -2; i <= 2; i++)
             for (int j = -2; j <= 2; j++)

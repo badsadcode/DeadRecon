@@ -28,6 +28,11 @@ public partial class Hud : Control
     private float _hitMarker = -1;
     private bool _hitKill;
     private Font _font = null!;
+    private static string _title = "", _subtitle = "";
+    private static float _titleAge = 99;
+
+    /// <summary>A quiet title card (entering a village...): fades in, holds, fades out.</summary>
+    public static void Announce(string title, string subtitle) { _title = title; _subtitle = subtitle; _titleAge = 0; }
 
     private static readonly Color Ink = new(.93f, .91f, .84f);
     private static readonly Color Shadow = new(0, 0, 0, .65f);
@@ -47,6 +52,7 @@ public partial class Hud : Control
     public override void _Process(double delta)
     {
         float dt = (float)delta;
+        _titleAge += dt;
         for (int i = _hurts.Count - 1; i >= 0; i--)
         {
             var (b, age) = _hurts[i];
@@ -70,6 +76,14 @@ public partial class Hud : Control
 
     public override void _Draw()
     {
+        if (_titleAge < 5)
+        {
+            float a = Math.Clamp(_titleAge * 2, 0, 1) * Math.Clamp((5 - _titleAge) / 1.5f, 0, 1);
+            var view = GetViewportRect().Size;
+            Text(new Vector2(0, view.Y * .24f), _title, 30, new Color(Ink, a), HorizontalAlignment.Center, view.X);
+            Text(new Vector2(0, view.Y * .24f + 26), _subtitle.ToUpper(), 14, new Color(Ink, .6f * a), HorizontalAlignment.Center, view.X);
+        }
+
         var size = GetViewportRect().Size;
         var centre = size / 2;
         if (Player.Dead) return;

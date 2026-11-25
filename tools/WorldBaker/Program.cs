@@ -8,6 +8,7 @@
 //   tiles/w_<x>_<z>.r16   water surface, same encoding, 0 = dry
 //   preview.png           hillshaded map of the region (rivers/lakes in blue)
 //   overview.png          the whole generated landmass with the baked region outlined
+//   settlements.json, settle_mask.png, settlements.png   sites and roads (Settler.cs), cut into the height tiles
 //
 // Tiles share their edge samples with their neighbours (TileSize / Spacing + 1 samples per side), so they join exactly.
 // Region coordinates: (0,0) is the region's north-west corner, +x east, +z south, metres. Heights in metres.
@@ -36,7 +37,8 @@ static class Program
 
     static int Main(string[] args)
     {
-        if (args.Length < 1) { Console.Error.WriteLine("usage: WorldBaker <recipe.world.json> [outDir]"); return 2; }
+        if (args.Length < 1) { Console.Error.WriteLine("usage: WorldBaker <recipe.world.json> [outDir]  |  WorldBaker settle <worldDir>"); return 2; }
+        if (args[0] == "settle") { Settler.Run(Path.GetFullPath(args.Length > 1 ? args[1] : "world/jungle")); return 0; }
         string recipePath = Path.GetFullPath(args[0]);
         var json = new JsonSerializerOptions { PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip };
         var recipe = JsonSerializer.Deserialize<Recipe>(File.ReadAllText(recipePath), json) ?? throw new InvalidDataException("Empty recipe.");
@@ -118,6 +120,9 @@ static class Program
             stats = new { lowest, highest, waterShare = (double)wet / samples, clipped },
         };
         File.WriteAllText(Path.Combine(outDir, "world.json"), JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
+        // Fresh ground: the settle pass must start from these heights, not from an older settle's copy.
+        if (Directory.Exists(Path.Combine(outDir, "tiles_raw"))) Directory.Delete(Path.Combine(outDir, "tiles_raw"), true);
+        Settler.Run(outDir);
         Log($"Done in {total.Elapsed.TotalSeconds:0.0} s -> {outDir}");
         return 0;
     }

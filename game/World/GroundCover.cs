@@ -136,6 +136,14 @@ public partial class GroundCover : Node3D
                 int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
                 if (World.IsWet(gx, gz) || World.Ground(gx, gz) > 1500) continue;
                 if (k < 2 && TreeScatter.InClearing(x, z, .85f)) continue; // camp ground is trampled; grass may stay
+                if (Settlements.Current is { } towns)
+                {
+                    // Nothing grows on a road; yards are trampled, with a few tufts of grass left at the edges.
+                    if (towns.RoadAt(x, z) > .2f || towns.FieldAt(x, z) > .05f) continue;
+                    float yard = towns.YardAt(x, z);
+                    if (k < 2 && yard > .35f) continue;
+                    if (k == 2 && yard > .6f && Unit(Hash(ax, az, s + 9)) < .75f) continue;
+                }
                 float dx = World.Ground(gx + 1, gz) - World.Ground(gx - 1, gz), dz = World.Ground(gx, gz + 1) - World.Ground(gx, gz - 1);
                 if ((dx * dx + dz * dz) / (4 * World.Spacing * World.Spacing) > 1.2f) continue; // steeper than ~48 degrees
                 float scale = kind.MinScale + (kind.MaxScale - kind.MinScale) * Unit(Hash(ax, az, s + 4));

@@ -30,6 +30,8 @@ public partial class Main : Node3D
 	private Mission _mission = null!;
 	private Weather _weather = null!;
 	private TimeOfDay _time = null!;
+	private Settlements _towns = null!;
+	private Villages _villages = null!;
 	private DeadRecon.UI.PauseMenu _menu = null!;
 	private ColorRect _hurt = null!;
 	private Label _deathText = null!;
@@ -57,6 +59,7 @@ public partial class Main : Node3D
 			return;
 		}
 		_world = BakedWorld.Load(dir);
+		_towns = Settlements.Load(dir, _world);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
 
 		var worldEnv = MakeEnvironment();
@@ -96,7 +99,7 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -108,6 +111,8 @@ public partial class Main : Node3D
 		AddChild(_terrain);
 		AddChild(_trees);
 		AddChild(_cover);
+		_villages = new Villages { World = _world, Towns = _towns, Viewer = _walker };
+		AddChild(_villages);
 
 		// The camp's guards: a grumpy patroller and a grumpier sentry by the radio desk.
 		Guard AddGuard(Vector3 home, bool sentry)
@@ -153,7 +158,10 @@ public partial class Main : Node3D
 		_walker.SurfaceAt = p =>
 		{
 			var (gx, gz) = _world.ToSample(p.X, p.Z);
-			if (_world.IsWet((int)gx, (int)gz)) return DeadRecon.Audio.Synth.Surface.Water;
+			if (_world.IsWet((int)gx, (int)gz) || (_towns.FieldAt(p.X, p.Z) > .9f && p.Y < _world.HeightAt(p.X, p.Z) + .3f)) return DeadRecon.Audio.Synth.Surface.Water;
+			if (p.Y > _world.HeightAt(p.X, p.Z) + .6f) return DeadRecon.Audio.Synth.Surface.Wood;   // floors, verandas, stairs
+			if (_towns.RoadAt(p.X, p.Z) > .4f || _towns.YardAt(p.X, p.Z) > .5f)
+				return _weather.Wetness > .45f ? DeadRecon.Audio.Synth.Surface.Mud : DeadRecon.Audio.Synth.Surface.Dirt;
 			return _weather.Wetness > .45f ? DeadRecon.Audio.Synth.Surface.Mud : DeadRecon.Audio.Synth.Surface.Leaves;
 		};
 
@@ -199,6 +207,8 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string villageTest = Arg("villagetest", "");
+		if (villageTest != "") _ = RunVillageTest(villageTest);
 		string dayTest = Arg("daytest", "");
 		if (dayTest != "") _ = RunDayTest(dayTest);
 		string ragTest = Arg("ragdolltest", "");
@@ -602,6 +612,136 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	/// <summary>Villages and roads: photos of the nearest village (noon, golden hour, night, rain), a road, and a walk up a
+	/// house's stairs onto its veranda.</summary>
+	private async Task RunVillageTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[village] {name}: {Engine.GetFramesPerSecond()} fps");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		void Key(Godot.Key k, bool down) => Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = k, Keycode = k, Pressed = down });
+		foreach (var h in FindChildren("*", nameof(DeadRecon.UI.Hud), true, false)) ((Control)h).Visible = false;
+		_hud.Visible = false;
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 12;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		_weapon.Visible = false;
+		var start = _walker.GlobalPosition;
+		Settlements.Site? village = null;
+		foreach (var s in _towns.Sites)
+			if (s.Kind == "village" && (village == null || s.Centre.DistanceTo(start) < village.Centre.DistanceTo(start))) village = s;
+		if (village == null) { GD.PrintErr("[village] no village"); GetTree().Quit(1); return; }
+		GD.Print($"[village] {village.Name} at {village.Centre}, {village.Centre.DistanceTo(start):0} m from spawn");
+		var c = village.Centre;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = c + new Vector3(0, 40, 0);
+		for (int f = 0; f < 2400 && (_trees.Pending > 0 || !_terrain.Settled || _villages.BuiltCount == 0 || !_terrain.HasCollisionAt(c)); f++) await Frames(1);
+		await Frames(60);
+		var over = c + new Vector3(-38, 26, 34);
+		_walker.GlobalPosition = over; LookAt(c);
+		await Frames(20); await Shot("1_overview_noon");
+		var eye = c + new Vector3(-9, 0, 7); eye.Y = _world.HeightAt(eye.X, eye.Z) + .2f;
+		_walker.GlobalPosition = eye; LookAt(c + new Vector3(0, 1.5f, 0) - (eye - c) * 1.5f);
+		await Frames(20); await Shot("2_plaza_noon");
+		_time.Hour = 17.4f; await Frames(30); await Shot("3_plaza_golden");
+		_walker.GlobalPosition = over; LookAt(c); await Frames(20); await Shot("4_overview_golden");
+		_time.Hour = 21.5f;
+		_walker.GlobalPosition = eye; LookAt(c + new Vector3(0, 1.5f, 0) - (eye - c) * 1.5f);
+		await Frames(40); await Shot("5_plaza_night");
+		_walker.GlobalPosition = over; LookAt(c); await Frames(20); await Shot("6_overview_night");
+		_time.Hour = 15; _weather.SetNow(Weather.Kind.Rain);
+		_walker.GlobalPosition = eye; LookAt(c + new Vector3(0, 1.5f, 0) - (eye - c) * 1.5f);
+		await Frames(60); await Shot("7_plaza_rain");
+		_weather.SetNow(Weather.Kind.Clear); _time.Hour = 9.5f;
+		// A road just outside the village.
+		foreach (var road in _towns.Roads)
+		{
+			int i = Array.FindIndex(road.Points, q => q.DistanceTo(c) is > 90 and < 130);
+			if (i < 0 || i + 3 >= road.Points.Length) continue;
+			var p = road.Points[i];
+			_walker.GlobalPosition = p + Vector3.Up * 1.0f;
+			LookAt(road.Points[Math.Max(0, i - 6)] + Vector3.Up * 1.2f);
+			for (int f = 0; f < 600 && _trees.Pending > 0; f++) await Frames(1);
+			await Frames(40); await Shot("8_road");
+			break;
+		}
+		// Fields: the nearest paddy and wheat field to spawn, by day, in the rain, at golden hour.
+		foreach (var kind in new[] { "paddy", "wheat" })
+		{
+			Settlements.Field? best = null;
+			foreach (var f in _towns.Fields)
+				if (f.Kind == kind && f.Stage != "flooded" && (best == null || f.Centre.DistanceTo(start) < best.Centre.DistanceTo(start))) best = f;
+			if (best == null) continue;
+			var fc = best.Centre;
+			var basis = new Basis(Vector3.Up, best.Rotation);
+			var from = fc + basis * new Vector3(-best.W / 2 - 4, 0, best.D / 2 + 3);
+			from.Y = _world.HeightAt(from.X, from.Z) + 2.2f;
+			_walker.SetFlying(true);
+			_walker.GlobalPosition = from;
+			for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+			await Frames(90);
+			LookAt(fc + basis * new Vector3(best.W / 4, 0, -best.D / 4));
+			_time.Hour = 10; _weather.SetNow(Weather.Kind.Clear);
+			await Frames(30); await Shot($"f_{kind}_day");
+			_time.Hour = 17.3f; await Frames(30); await Shot($"f_{kind}_golden");
+			_time.Hour = 14; _weather.SetNow(Weather.Kind.Rain);
+			_walker.GlobalPosition = from - new Vector3(0, 1.0f, 0);
+			LookAt(fc + basis * new Vector3(-best.W / 4, 0, 0));
+			await Frames(90); await Shot($"f_{kind}_rain");
+			_weather.SetNow(Weather.Kind.Clear);
+		}
+		// The nearest checkpoint.
+		Settlements.Site? cp = null;
+		foreach (var s in _towns.Sites) if (s.Kind == "outpost" && (cp == null || s.Centre.DistanceTo(start) < cp.Centre.DistanceTo(start))) cp = s;
+		if (cp != null)
+		{
+			_time.Hour = 11;
+			_walker.SetFlying(true);
+			_walker.GlobalPosition = cp.Centre + new Vector3(14, 7, 14);
+			for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+			await Frames(90);
+			LookAt(cp.Centre + Vector3.Up);
+			await Frames(20); await Shot("c_checkpoint");
+		}
+		_time.Hour = 9.5f;
+		_walker.GlobalPosition = c + new Vector3(0, 30, 0);
+		for (int f = 0; f < 600 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		await Frames(60);
+		// Walk up some stairs.
+		bool climbed = false;
+		foreach (var (foot, top) in _villages.Stairs)
+		{
+			if (foot.DistanceTo(c) > village.Radius + 10) continue;
+			_walker.SetFlying(false);
+			_walker.GlobalPosition = foot + Vector3.Up * .3f;
+			LookAt(new Vector3(top.X, foot.Y + 1.65f, top.Z));
+			await Frames(30);
+			Key(Godot.Key.W, true);
+			for (int f = 0; f < 240 && _walker.GlobalPosition.Y < top.Y - .3f; f++) await Frames(1);
+			await Frames(25);
+			Key(Godot.Key.W, false);
+			await Frames(20);
+			float floorRise = _walker.GlobalPosition.Y - _world.HeightAt(_walker.GlobalPosition.X, _walker.GlobalPosition.Z);
+			GD.Print($"[village] stairs: feet {_walker.GlobalPosition.Y:0.00}, veranda {top.Y:0.00}, {floorRise:0.0} m above ground");
+			climbed = _walker.GlobalPosition.Y > top.Y - .4f;
+			_walker.Look(Mathf.RadToDeg(_walker.Rotation.Y) + 180, -5);
+			await Frames(10); await Shot("9_from_veranda");
+			break;
+		}
+		GD.Print(climbed ? "[village] climbed the stairs: ok" : "[village] FAILED to climb the stairs");
+		GetTree().Quit();
+	}
+
 	private async Task RunDayTest(string dir)
 	{
 		Directory.CreateDirectory(dir);
