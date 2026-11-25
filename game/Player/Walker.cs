@@ -77,6 +77,8 @@ public partial class Walker : CharacterBody3D, IDamageable
     public Vector2 AimOffset { get; set; }
     /// <summary>Set by the weapon while aiming: you move carefully, no sprinting.</summary>
     public bool Aiming { get; set; }
+    /// <summary>Your weapon light is on: guards see you in the dark.</summary>
+    public bool Lit { get; set; }
     private float _recoilKick, _recoilYaw;
 
     public void SetFlying(bool flying)

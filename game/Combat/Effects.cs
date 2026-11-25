@@ -328,6 +328,34 @@ public static partial class Effects
         return _gunshot = Wav(data, Rate);
     }
 
+    private static AudioStreamWav? _suppressed;
+
+    /// <summary>A suppressed shot: no crack, a hard "thup" and the action cycling. Not film-quiet.</summary>
+    public static AudioStreamWav SuppressedShot()
+    {
+        if (_suppressed != null) return _suppressed;
+        const int Rate = 44100;
+        int n = (int)(Rate * .22f);
+        var data = new byte[n * 2];
+        var rng = new Random(3);
+        float lp = 0, lp2 = 0;
+        for (int i = 0; i < n; i++)
+        {
+            float t = i / (float)Rate;
+            float noise = (float)rng.NextDouble() * 2 - 1;
+            lp += (noise - lp) * .12f;
+            lp2 += (lp - lp2) * .2f;
+            float thup = lp2 * 5 * MathF.Exp(-t * 45) + MathF.Sin(MathF.Tau * (130 + 80 * MathF.Exp(-t * 60)) * t) * .6f * MathF.Exp(-t * 35);
+            // The bolt: two small metallic ticks.
+            float bolt = 0;
+            foreach (float at in new[] { .018f, .055f }) { float d = t - at; if (d > 0 && d < .01f) bolt += noise * .5f * MathF.Exp(-d * 600); }
+            float s = Math.Clamp((thup + bolt) * (t < .001f ? t / .001f : 1), -1, 1);
+            short v = (short)(s * 26000);
+            data[i * 2] = (byte)v; data[i * 2 + 1] = (byte)(v >> 8);
+        }
+        return _suppressed = Wav(data, Rate);
+    }
+
     public static AudioStreamWav Click(float pitch, float length)
     {
         const int Rate = 44100;

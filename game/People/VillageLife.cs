@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DeadRecon.AI;
 using DeadRecon.Combat;
 using DeadRecon.Missions;
@@ -304,6 +305,13 @@ public partial class VillageLife : Node
         if (_helpedAt.TryGetValue(site.Index, out var t) && now - t < 300) return "We already patched you up. Try not to get shot for five minutes.";
         _helpedAt[site.Index] = now;
         Player.Heal(Walker.MaxHealth);
+        // And something for the road.
+        if (DeadRecon.Gear.Kit.Current is { } kit)
+        {
+            kit.Add(DeadRecon.Gear.ItemDef.Bandage, 2, quiet: true);
+            kit.Add(DeadRecon.Gear.ItemDef.RiceParcel, 1, quiet: true);
+            Hud.Toast("Got 2 dressings and a rice parcel");
+        }
         float hour = TimeOfDay.Current?.Hour ?? 12;
         if (level == Support.Level.Loyal && (hour >= 19 || hour < 5) && TimeOfDay.Current is { } time)
         {
@@ -338,6 +346,15 @@ public partial class VillageLife : Node
             if (job.Done || job.Guards.Count == 0 || !job.Guards.TrueForAll(g => !IsInstanceValid(g) || g.State == Guard.Mood.Dead)) continue;
             job.Done = true;
             Support.Change(site, 30, $"you cleared {job.Checkpoint.Name}");
+            // A thank-you: whatever the village could find that a soldier might like.
+            if (DeadRecon.Gear.Kit.Current is { } kit)
+            {
+                bool laser = !kit.AllItems.Any(i => i.Def == DeadRecon.Gear.ItemDef.Laser) && kit.Loadout.Side != "side_laser";
+                var gift = laser ? DeadRecon.Gear.ItemDef.Laser : DeadRecon.Gear.ItemDef.Compensator;
+                kit.Add(gift, 1, quiet: true);
+                kit.Add(DeadRecon.Gear.ItemDef.Mag30, 2, quiet: true);
+                Hud.Toast($"{Towns.Sites[site].Name} gave you: {gift.Name.ToLower()}, two long magazines");
+            }
             Support.Spread(site, 5);
             Hud.Announce($"{job.Checkpoint.Name} is clear", $"{Towns.Sites[site].Name} won't forget it");
         }

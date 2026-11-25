@@ -55,8 +55,9 @@ public partial class Hud : Control
     public override void _Ready()
     {
         SetAnchorsPreset(LayoutPreset.FullRect);
+        ProcessMode = ProcessModeEnum.Always;   // keeps redrawing under the kit screen (the game is paused there)
         MouseFilter = MouseFilterEnum.Ignore;
-        _font = ThemeDB.FallbackFont;
+        _font = UiStyle.Font;
         Player.Hurt += (_, from) => _hurts.Add((Bearing(from - Player.GlobalPosition), 0));
         Rifle.HitConfirmed += kill => { _hitMarker = 0; _hitKill = kill; };
     }
@@ -123,28 +124,51 @@ public partial class Hud : Control
 
         var size = GetViewportRect().Size;
         var centre = size / 2;
-        if (Player.Dead) return;
+        if (Player.Dead || KitScreen.IsOpen) return;
 
         DrawCompass(new Vector2(centre.X, 34), 560);
         // Objective line under the compass.
         Text(new Vector2(0, 122), Mission.Objective(), 18, Ink, HorizontalAlignment.Center, size.X);
 
-        // Health and stance (bottom left).
-        var hp = new Vector2(28, size.Y - 46);
-        DrawRect(new Rect2(hp, new Vector2(220, 10)), new Color(0, 0, 0, .45f));
+        // Health, stance, dressings (bottom left): a segmented bar, a quiet line of status under it.
+        var hp = new Vector2(30, size.Y - 52);
         float frac = Player.Health / Walker.MaxHealth;
-        DrawRect(new Rect2(hp, new Vector2(220 * frac, 10)), frac > .35f ? Ink : Danger);
+        const int Segments = 10;
+        for (int s = 0; s < Segments; s++)
+        {
+            var seg = new Rect2(hp + new Vector2(s * 25, 0), new Vector2(22, 9));
+            DrawRect(seg, new Color(0, 0, 0, .45f));
+            float fill = Math.Clamp(frac * Segments - s, 0, 1);
+            if (fill > 0) DrawRect(new Rect2(seg.Position, new Vector2(22 * fill, 9)), frac > .35f ? Ink : Danger);
+        }
         string stance = Player.Flying ? "flying" : Player.Crouching ? "crouched" : Player.Running ? "running" : "standing";
-        Text(hp + new Vector2(0, -10), $"{stance.ToUpper()}   {Weather.Describe()}   {TimeOfDay.Current?.Clock}", 15, Dim);
+        Text(hp + new Vector2(0, -12), $"{stance.ToUpper()}   ·   {Weather.Describe().ToUpper()}   ·   {TimeOfDay.Current?.Clock}", 14, Dim);
+        if (DeadRecon.Gear.Kit.Current is { } kit)
+        {
+            int dressings = kit.Medical;
+            Text(hp + new Vector2(0, 30), kit.Healing ? "PATCHING UP..." : $"H   DRESSINGS x{dressings}", 13, kit.Healing ? Amber : dressings == 0 ? new Color(Danger, .8f) : Dim);
+            Text(hp + new Vector2(150, 30), "TAB   KIT", 13, Dim);
+        }
 
-        // Ammo (bottom right).
+        // The rifle (bottom right): a picture of it as fitted, rounds, magazines, mode and what's on it.
         if (Rifle.Loaded)
         {
-            Text(new Vector2(size.X - 260, size.Y - 34), $"{Rifle.Ammo}", 40, Rifle.Ammo == 0 ? Danger : Ink, HorizontalAlignment.Right, 150);
-            Text(new Vector2(size.X - 104, size.Y - 34), $"/ {Rifle.MagazineCapacity}", 20, Dim);
-            Text(new Vector2(size.X - 260, size.Y - 112), Rifle.Automatic ? "AUTO" : "SEMI", 14, Dim, HorizontalAlignment.Right, 228);
-            if (Rifle.Reloading) Text(new Vector2(size.X - 260, size.Y - 84), "RELOADING", 16, Amber, HorizontalAlignment.Right, 228);
-            else if (Rifle.Ammo == 0) Text(new Vector2(size.X - 260, size.Y - 84), "R TO RELOAD", 16, Danger, HorizontalAlignment.Right, 228);
+            var right = new Vector2(size.X - 30, size.Y - 26);
+            if (DeadRecon.Gear.Kit.Current is { } k && DeadRecon.Gear.IconBaker.Current?.Get(DeadRecon.Gear.IconBaker.RifleKey(k.Loadout)) is { } pic)
+            {
+                var sz = pic.GetSize() * (66f / pic.GetSize().Y);
+                DrawTextureRect(pic, new Rect2(right - new Vector2(sz.X, 150), sz), false, new Color(1, 1, 1, .8f));
+            }
+            Text(right - new Vector2(300, 8), $"{Rifle.Ammo}", 44, Rifle.Ammo == 0 ? Danger : Ink, HorizontalAlignment.Right, 210);
+            Text(right - new Vector2(84, 10), $"/ {Rifle.MagazineCapacity}", 20, Dim);
+            int mags = DeadRecon.Gear.Kit.Current?.Magazines ?? 0;
+            Text(right - new Vector2(300, 62), $"+{mags} MAG{(mags == 1 ? "" : "S")}   ·   {(Rifle.Automatic ? "AUTO" : "SEMI")}", 13, mags == 0 ? new Color(Danger, .85f) : Dim, HorizontalAlignment.Right, 300);
+            var tags = new System.Collections.Generic.List<string>();
+            if (Rifle.Suppressed) tags.Add("SUPPRESSED");
+            if (DeadRecon.Gear.Kit.Current is { LightOn: true } lit && Rifle.HasLight) tags.Add(lit.Loadout.Side == "side_laser" ? "LASER ON" : "LIGHT ON");
+            if (tags.Count > 0) Text(right - new Vector2(300, 80), string.Join("   ", tags), 12, Amber, HorizontalAlignment.Right, 300);
+            if (Rifle.Reloading) Text(right - new Vector2(300, 98), "RELOADING", 16, Amber, HorizontalAlignment.Right, 300);
+            else if (Rifle.Ammo == 0) Text(right - new Vector2(300, 98), mags > 0 ? "R TO RELOAD" : "OUT OF AMMO", 16, Danger, HorizontalAlignment.Right, 300);
         }
 
         // Take-the-intel prompt with a progress ring.

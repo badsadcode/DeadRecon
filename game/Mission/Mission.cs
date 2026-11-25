@@ -294,6 +294,7 @@ public partial class Mission : Node3D
             State = Phase.Complete;
             GD.Print($"[mission] complete in {Elapsed:0} s");
             Completed?.Invoke();
+            DeadRecon.Gear.Kit.Current?.RemoveIntel();   // handed over at the landing zone
             ShowPanel();
         }
 
@@ -314,6 +315,7 @@ public partial class Mission : Node3D
         State = Phase.Extract;
         SearchProgress = 0;
         _intelProp.Visible = false;
+        DeadRecon.Gear.Kit.Current?.AddIntel(IntelName);
         GD.Print($"[mission] took {IntelName}");
         ShowPanel();
     }

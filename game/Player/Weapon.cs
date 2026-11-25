@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using DeadRecon.Combat;
+using DeadRecon.Gear;
 using Godot;
 
 namespace DeadRecon.Player;
@@ -11,6 +12,8 @@ namespace DeadRecon.Player;
 /// LMB fire, RMB aim (scope), R reload, V semi/auto, Shift while scoped holds your breath.
 /// Scope sway follows your breathing and stance; recoil springs mostly back. Casings fly from SOCKET_Eject.
 /// Bullets are hitscan; trunks stop them via the foliage registry.
+/// <para>What's fitted (optic, muzzle device, light/laser, foregrip, paint) and the magazines come from the
+/// <see cref="Kit"/>: the rifle is rebuilt by <see cref="RifleBuilder"/> whenever the loadout changes.</para>
 /// </summary>
 public partial class Weapon : Node3D
 {
@@ -19,17 +22,19 @@ public partial class Weapon : Node3D
 
     // Test-gun numbers (BadGun doesn't ship ballistics; these are ours).
     private const float RoundsPerMinute = 600, Range = 900, HipSpread = .014f, AimSpread = .0006f;   // ~2' scoped: the rifle itself is accurate
-    private const int MagazineSize = 20;
     private const float Damage = 34; // three to the body; the guard triples it for headshots
     private const float RaiseFov = 40, ScopeFov = 11, HipFov = 70, AimSpeed = 7;  // ScopeFov 11 = roughly 6x
     private static readonly Vector3 HipOffset = new(.16f, -.21f, -.36f); // where the grip sits relative to the eye
 
-    public int Ammo { get; private set; } = MagazineSize;
+    public int Ammo => Kit.Current?.Loaded ?? 0;
     public bool Loaded { get; private set; }
     public int ShotsFired { get; private set; }
     /// <summary>A bullet hit a person (true = that killed them). The HUD shows a hit marker.</summary>
     public event Action<bool>? HitConfirmed;
-    public int MagazineCapacity => MagazineSize;
+    public int MagazineCapacity => Kit.Current?.LoadedMag.Capacity ?? 20;
+    public bool Suppressed => _handling.Noise < .5f;
+    public bool HasLight => _light != null || _laserFrom != null;
+    public string OpticName => Kit.Current is { } k && ItemDef.All.TryGetValue(k.Loadout.Optic, out var d) ? d.Name : "";
     public bool Scoped => _scope?.Visible == true;
     public float AimAmount => _aim;
     public bool Reloading => _reload >= 0;
@@ -42,6 +47,13 @@ public partial class Weapon : Node3D
     public Vector3 LastPoint { get; private set; }
 
     private Node3D _model = null!;
+    private RifleBuilder.OpticStats _optic = RifleBuilder.Optic("optic_stock");
+    private (float Recoil, float Noise, float Flash, float Sway) _handling = (1, 1, 1, 1);
+    private SpotLight3D? _light;
+    private Node3D? _laserFrom;
+    private MeshInstance3D? _laserBeam, _laserDot;
+    private AudioStreamPlayer _quietShot = null!;
+    private float _reloadSpeed = 1, _noMagsToast;
     private Node3D? _trigger, _magazine, _charging, _muzzle, _eject;
     private float _swayTime, _breathShake;
     private bool _triggerWasDown, _breathSpent;
@@ -62,29 +74,8 @@ public partial class Weapon : Node3D
     public override void _Ready()
     {
         if (!ResourceLoader.Exists(ScenePath)) { GD.PushWarning($"No weapon at {ScenePath}"); return; }
-        _model = ResourceLoader.Load<PackedScene>(ScenePath).Instantiate<Node3D>();
-        // BadGun faces +Z (muzzle direction); Godot cameras look down -Z.
-        _model.RotationDegrees = new Vector3(0, 180, 0);
-        AddChild(_model);
-        foreach (var mi in FindAll<GeometryInstance3D>(_model)) mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
-
-        _trigger = _model.FindChild("Trigger", true, false) as Node3D;
-        _magazine = _model.FindChild("Magazine", true, false) as Node3D;
-        _charging = _model.FindChild("ChargingHandle", true, false) as Node3D;
-        _muzzle = _model.FindChild("SOCKET_Muzzle", true, false) as Node3D;
-        _eject = _model.FindChild("SOCKET_Eject", true, false) as Node3D;
-        ReadMotion(_trigger, ref _triggerTravel, out _);
-        if (ReadMotion(_magazine, ref _magazineTravel, out var magAxis)) _magazineAxis = magAxis;
-        if (ReadMotion(_charging, ref _chargingTravel, out var chAxis)) _chargingAxis = chAxis;
-        if (_magazine != null) _magazineRest = _magazine.Position;
-        if (_charging != null) _chargingRest = _charging.Position;
-        if (_model.FindChild("SOCKET_ADS", true, false) is Node3D ads) _adsInModel = InModel(ads).Origin;
-        else _adsInModel = new Vector3(0, .1f, -.2f);
-
-        _flashLight = new OmniLight3D { LightColor = new Color(1, .72f, .38f), LightEnergy = 0, OmniRange = 6, ShadowEnabled = false };
-        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.34f, .34f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
-        (_muzzle ?? _model).AddChild(_flashLight);
-        (_muzzle ?? _model).AddChild(_flashSprite);
+        Rebuild();
+        if (Kit.Current != null) Kit.Current.LoadoutChanged += Rebuild;
 
         // Scope view: a 3D scope can't magnify, so at full aim the gun hides and this overlay + narrow FOV takes over.
         _scopeMaterial = new ShaderMaterial { Shader = GD.Load<Shader>("res://game/Player/scope.gdshader") };
@@ -95,8 +86,56 @@ public partial class Weapon : Node3D
         AddChild(layer);
 
         _shot = Player(Effects.Gunshot(), -2);
+        _quietShot = Player(Effects.SuppressedShot(), -6);
         _click = Player(Effects.Click(1800, .03f), -8);
         _clack = Player(Effects.Click(700, .07f), -6);
+        Loaded = true;
+    }
+
+    public override void _ExitTree() { if (Kit.Current != null) Kit.Current.LoadoutChanged -= Rebuild; }
+
+    /// <summary>(Re)build the rifle with what's fitted now.</summary>
+    private void Rebuild()
+    {
+        var loadout = Kit.Current?.Loadout ?? new Loadout();
+        if (RifleBuilder.Build(loadout) is not { } r) return;
+        if (_model != null && IsInstanceValid(_model)) _model.QueueFree();
+        _model = r.Model;
+        // BadGun faces +Z (muzzle direction); Godot cameras look down -Z.
+        _model.RotationDegrees = new Vector3(0, 180, 0);
+        AddChild(_model);
+        foreach (var mi in FindAll<GeometryInstance3D>(_model)) mi.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        _trigger = r.Trigger; _magazine = r.Magazine; _charging = r.Charging; _muzzle = r.Muzzle; _eject = r.Eject;
+        _light = r.Light; _laserFrom = r.Laser;
+        ReadMotion(_trigger, ref _triggerTravel, out _);
+        if (ReadMotion(_magazine, ref _magazineTravel, out var magAxis)) _magazineAxis = magAxis;
+        if (ReadMotion(_charging, ref _chargingTravel, out var chAxis)) _chargingAxis = chAxis;
+        if (_magazine != null) _magazineRest = _magazine.Position;
+        if (_charging != null) _chargingRest = _charging.Position;
+        _adsInModel = r.Ads;
+        _optic = RifleBuilder.Optic(loadout.Optic);
+        _handling = RifleBuilder.Handling(loadout);
+
+        _flashLight = new OmniLight3D { LightColor = new Color(1, .72f, .38f), LightEnergy = 0, OmniRange = 6, ShadowEnabled = false };
+        _flashSprite = new MeshInstance3D { Mesh = new QuadMesh { Size = new Vector2(.34f, .34f) }, MaterialOverride = Effects.FlashMaterial(), Visible = false, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+        (_muzzle ?? _model).AddChild(_flashLight);
+        (_muzzle ?? _model).AddChild(_flashSprite);
+
+        // Laser: a thin red line to whatever it touches, and a dot there.
+        _laserBeam?.QueueFree(); _laserDot?.QueueFree(); _laserBeam = _laserDot = null;
+        if (_laserFrom != null)
+        {
+            var red = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(1, .1f, .08f, .55f), ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha, BlendMode = BaseMaterial3D.BlendModeEnum.Add,
+                EmissionEnabled = true, Emission = new Color(1, .1f, .05f), EmissionEnergyMultiplier = 3,
+            };
+            _laserBeam = new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = .0012f, BottomRadius = .0012f, Height = 1, RadialSegments = 4, Rings = 0 }, MaterialOverride = red, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false };
+            _laserDot = new MeshInstance3D { Mesh = new SphereMesh { Radius = .02f, Height = .04f, RadialSegments = 6, Rings = 3 }, MaterialOverride = red, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off, Visible = false };
+            GetTree().CurrentScene.CallDeferred(Node.MethodName.AddChild, _laserBeam);
+            GetTree().CurrentScene.CallDeferred(Node.MethodName.AddChild, _laserDot);
+        }
         Loaded = true;
     }
 
@@ -104,7 +143,7 @@ public partial class Weapon : Node3D
     public void ForceAim(bool on) { _forceAim = on; _aim = on ? 1 : 0; }
     public void FlashForShot() { _flash = 0; }
     public void TestFire() { _cooldown = 0; Fire(); }
-    public void TestReload() { Ammo = MagazineSize; }
+    public void TestReload() { Kit.Current?.TestTopUp(); }
 
     public override void _Process(double delta)
     {
@@ -115,11 +154,17 @@ public partial class Weapon : Node3D
         _aim = Mathf.MoveToward(_aim, wantAim ? 1 : 0, dt * AimSpeed * (wantAim ? 1 : 1.3f));
         float ease = _aim * _aim * (3 - 2 * _aim);
         bool scoped = _aim > .97f;
-        Walker.Camera.Fov = scoped ? ScopeFov : Mathf.Lerp(HipFov, RaiseFov, ease);
+        Walker.Camera.Fov = scoped ? _optic.Fov : Mathf.Lerp(HipFov, Math.Max(RaiseFov, _optic.Fov), ease);
         Walker.SensitivityScale = Walker.Camera.Fov / HipFov;
-        _model.Visible = !scoped;
+        _model.Visible = !(scoped && _optic.HideGun);
         _scope.Visible = scoped;
-        if (scoped) { var vs = GetViewport().GetVisibleRect().Size; _scopeMaterial.SetShaderParameter("aspect", vs.X / vs.Y); }
+        if (scoped)
+        {
+            var vs = GetViewport().GetVisibleRect().Size;
+            _scopeMaterial.SetShaderParameter("aspect", vs.X / vs.Y);
+            _scopeMaterial.SetShaderParameter("reticle", _optic.Reticle);
+        }
+        UpdateLight();
 
         Walker.Aiming = _aim > .5f;
         UpdateCasings(dt);
@@ -133,7 +178,16 @@ public partial class Weapon : Node3D
         if (captured && trigger && (Automatic || newPull) && !Walker.FireLockedUntilRelease && _cooldown <= 0 && !Reloading) Fire();
         if (captured && Input.IsPhysicalKeyPressed(Key.V) && !_vWasDown) { Automatic = !Automatic; _click.Play(); }
         _vWasDown = Input.IsPhysicalKeyPressed(Key.V);
-        if (captured && Input.IsPhysicalKeyPressed(Key.R) && !Reloading && Ammo < MagazineSize) { _reload = 0; _clack.Play(); }
+        _noMagsToast -= dt;
+        if (captured && Input.IsPhysicalKeyPressed(Key.R) && !Reloading && Ammo < MagazineCapacity)
+        {
+            if (Kit.Current?.NextMagazine() is { } next)
+            {
+                _reload = 0; _clack.Play();
+                _reloadSpeed = next.FromPack ? .62f : 1;   // digging in the backpack takes longer than a vest pouch
+            }
+            else if (_noMagsToast <= 0) { DeadRecon.UI.Hud.Toast("No magazines left. Search the bodies."); _noMagsToast = 3; }
+        }
         UpdateReload(dt);
 
         // Pose: lerp from the hip pose to "ADS socket on the eye"; add bob, recoil kick.
@@ -146,6 +200,8 @@ public partial class Weapon : Node3D
         Position = HipOffset.Lerp(adsOffset, ease) + bob + new Vector3(0, 0, _kick * .05f);
         Rotation = new Vector3(_kick * (1 - ease * .6f) * .09f, 0, 0);
         if (_trigger != null) _trigger.Rotation = new Vector3(_cooldown > 0 ? _triggerTravel : 0, 0, 0);
+        // A long magazine is longer.
+        if (_magazine != null) _magazine.Scale = new Vector3(1, Kit.Current?.LoadedMag == ItemDef.Mag30 ? 1.35f : 1, 1);
 
         if (_flash >= 0)
         {
@@ -162,26 +218,34 @@ public partial class Weapon : Node3D
     private void Fire()
     {
         if (Walker.Dead) return;
-        if (Ammo <= 0) { _click.Play(); _cooldown = .25f; return; }
-        Ammo--;
+        if (Kit.Current == null || !Kit.Current.Shoot()) { _click.Play(); _cooldown = .25f; return; }
         ShotsFired++;
         _cooldown = 60f / RoundsPerMinute;
         _kick = Math.Min(_kick + 1, 1.6f);
-        _flash = 0;
-        _shot.PitchScale = 1 + _rng.RandfRange(-.06f, .06f);
-        _shot.Play();
-        DeadRecon.Audio.Ambience.Current?.Echo(Walker.GlobalPosition);
+        if (_handling.Flash > 0) _flash = 0;
+        if (Suppressed)
+        {
+            _quietShot.PitchScale = 1 + _rng.RandfRange(-.05f, .05f);
+            _quietShot.Play();
+        }
+        else
+        {
+            _shot.PitchScale = 1 + _rng.RandfRange(-.06f, .06f);
+            _shot.VolumeDb = _handling.Noise > 1 ? 0 : -2;
+            _shot.Play();
+            DeadRecon.Audio.Ambience.Current?.Echo(Walker.GlobalPosition);
+        }
         // The bullet leaves where you were aiming *before* this shot's recoil moves the view.
         // (Applying recoil first sent every bullet ~0.5 degrees high: a metre over the head at 100 m.)
         var cam = Walker.Camera.GlobalTransform;
-        float spread = Mathf.Lerp(HipSpread, AimSpread, _aim);
+        float spread = Mathf.Lerp(HipSpread * (LaserOn ? .55f : 1), AimSpread, _aim);
         var dir = (-cam.Basis.Z + cam.Basis.X * _rng.RandfRange(-spread, spread) + cam.Basis.Y * _rng.RandfRange(-spread, spread)).Normalized();
 
-        float steady = Walker.Crouching ? .75f : 1;
+        float steady = (Walker.Crouching ? .75f : 1) * _handling.Recoil;
         Walker.AddRecoil(Mathf.DegToRad(Mathf.Lerp(1.1f, .55f, _aim) * steady), Mathf.DegToRad(_rng.RandfRange(-.4f, .4f) * steady));
         EjectCasing();
         MuzzleSmoke();
-        Hearing.Make(cam.Origin, Hearing.Gunshot, Walker);
+        Hearing.Make(cam.Origin, Hearing.Gunshot * _handling.Noise, Walker);
         // The sight is zeroed at 100 m: the bore points a hair up so the bullet's drop brings it back onto the
         // crosshair there. Closer it's a touch high (cm), further it falls: hold over at 200 m and beyond.
         dir = dir.Rotated(cam.Basis.X, DeadRecon.Combat.Ballistics.ZeroAngle(100));
@@ -234,6 +298,7 @@ public partial class Weapon : Node3D
         float moving = Math.Min(new Vector2(Walker.Velocity.X, Walker.Velocity.Z).Length() / 2f, 1);
         // Ghost Recon-ish: a gentle drift you can work with, not Arma's wobble.
         float amp = (Walker.Crouching ? .0009f : .0018f) * (1 + 2.5f * moving) * (1 + 2 * _breathShake);
+        amp *= _handling.Sway;
         if (hold) amp *= .12f;
         float t = _swayTime;
         var sway = new Vector2(MathF.Sin(t * 1.9f) * .5f + MathF.Sin(t * .7f) * .5f, MathF.Sin(t * .95f) + MathF.Sin(t * 2.3f) * .25f) * amp;
@@ -334,7 +399,7 @@ public partial class Weapon : Node3D
     private void UpdateReload(float dt)
     {
         if (_reload < 0) return;
-        _reload += dt;
+        _reload += dt * _reloadSpeed;
         // 0-0.35 mag out, 0.35-0.9 swap, 0.9-1.25 mag in, 1.35-1.7 charging handle back and forward.
         float mag = _reload < .35f ? _reload / .35f : _reload < .9f ? 1 : _reload < 1.25f ? 1 - (_reload - .9f) / .35f : 0;
         float ch = _reload < 1.35f ? 0 : _reload < 1.5f ? (_reload - 1.35f) / .15f : _reload < 1.7f ? 1 - (_reload - 1.5f) / .2f : 0;
@@ -342,7 +407,32 @@ public partial class Weapon : Node3D
         if (_charging != null) _charging.Position = _chargingRest + _chargingAxis * _chargingTravel * ch;
         if (_reload >= 1.25f && _reload - dt < 1.25f) _clack.Play();
         if (_reload >= 1.5f && _reload - dt < 1.5f) _click.Play();
-        if (_reload >= 1.75f) { _reload = -1; Ammo = MagazineSize; }
+        if (_reload >= 1.75f) { _reload = -1; Kit.Current?.SwapMagazine(); }
+    }
+
+    private bool LaserOn => _laserFrom != null && Kit.Current?.LightOn == true;
+
+    /// <summary>Weapon light on/off (L); the laser line and dot follow the gun.</summary>
+    private void UpdateLight()
+    {
+        bool on = Kit.Current?.LightOn == true;
+        if (_light != null) _light.Visible = on;
+        Walker.Lit = on && _light != null;
+        if (_laserBeam == null || _laserDot == null || _laserFrom == null) return;
+        bool show = on && _model.Visible && IsInstanceValid(_laserBeam);
+        _laserBeam.Visible = _laserDot.Visible = show;
+        if (!show) return;
+        var from = _laserFrom.GlobalPosition;
+        var dir = -_laserFrom.GlobalTransform.Basis.Z;
+        var q = PhysicsRayQueryParameters3D.Create(from, from + dir * 150);
+        q.Exclude = new Godot.Collections.Array<Rid> { Walker.GetRid() };
+        var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+        var end = hit.Count > 0 ? (Vector3)hit["position"] : from + dir * 150;
+        if (DeadRecon.World.Foliage.RaycastTrunk(from, end) is { } wood) end = wood.Point;
+        float len = from.DistanceTo(end);
+        _laserBeam.GlobalTransform = new Transform3D(Basis.LookingAt(dir, Math.Abs(dir.Y) > .99f ? Vector3.Forward : Vector3.Up) * new Basis(Vector3.Right, MathF.PI / 2) * Basis.FromScale(new Vector3(1, len, 1)), from + dir * len / 2);
+        _laserDot.GlobalPosition = end;
+        _laserDot.Visible = hit.Count > 0;
     }
 
     // ---------------------------------------------------------------- helpers

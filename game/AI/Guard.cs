@@ -180,7 +180,9 @@ public partial class Guard : CharacterBody3D, IDamageable
         var to = Target.Chest - eye;
         float dist = to.Length();
         bool alert = State is Mood.Alert or Mood.Search;
-        float range = (alert ? AlertViewRange : ViewRange) * (Weather.Current?.SightFactor ?? 1) * DeadRecon.UI.Settings.GuardSight; // rain hides you too
+        // Rain and darkness hide you; a lit weapon light undoes the darkness part.
+        float sight = Target.Lit ? 1 - .4f * (Weather.Current?.Intensity ?? 0) : Weather.Current?.SightFactor ?? 1;
+        float range = (alert ? AlertViewRange : ViewRange) * sight * DeadRecon.UI.Settings.GuardSight;
         var forward = -GlobalTransform.Basis.Z;
         float cos = forward.Dot(to / Math.Max(dist, .01f));
         // How much of the player he could see: terrain must not be in the way, plants let some through.

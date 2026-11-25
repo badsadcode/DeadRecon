@@ -32,6 +32,8 @@ public partial class Main : Node3D
 	private TimeOfDay _time = null!;
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
+	private DeadRecon.Gear.Kit _kit = null!;
+	private DeadRecon.UI.KitScreen _kitScreen = null!;
 	private DeadRecon.People.VillageLife _life = null!;
 	private DeadRecon.UI.PauseMenu _menu = null!;
 	private ColorRect _hurt = null!;
@@ -81,6 +83,11 @@ public partial class Main : Node3D
 		_spawn = spawn;
 		_walker.GlobalPosition = spawn.position;
 		_walker.Look(spawn.yaw, -4);
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest"));
+		DeadRecon.Gear.Kit.Persist = !testing;
+		_kit = new DeadRecon.Gear.Kit { Player = _walker };
+		AddChild(_kit);
+		AddChild(new DeadRecon.Gear.IconBaker());
 		_weapon = new Weapon { Walker = _walker };
 		_walker.Camera.AddChild(_weapon);
 		_crosshair = new Label { Text = "·", HorizontalAlignment = HorizontalAlignment.Center, VerticalAlignment = VerticalAlignment.Center };
@@ -101,7 +108,6 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest"));
 		DeadRecon.People.Support.Persist = !testing;
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
@@ -185,6 +191,11 @@ public partial class Main : Node3D
 
 		// Player HUD (the debug text above is F3) and the Esc menu.
 		layer.AddChild(new DeadRecon.UI.Hud { Player = _walker, Rifle = _weapon, Mission = _mission, Weather = _weather });
+		// Tab: the kit screen (backpack and gunsmith), above the HUD.
+		var kitLayer = new CanvasLayer { Layer = 5 };
+		AddChild(kitLayer);
+		_kitScreen = new DeadRecon.UI.KitScreen { Kit = _kit, Player = _walker };
+		kitLayer.AddChild(_kitScreen);
 		_menu = new DeadRecon.UI.PauseMenu { Walker = _walker };
 		_menu.Changed += () => _hud.Visible = DeadRecon.UI.Settings.ShowDebug;
 		AddChild(_menu);
@@ -225,6 +236,8 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string kitTest = Arg("kittest", "");
+		if (kitTest != "") _ = RunKitTest(kitTest);
 		string lifeTest = Arg("lifetest", "");
 		if (lifeTest != "") _ = RunLifeTest(lifeTest);
 		string villageTest = Arg("villagetest", "");
@@ -261,7 +274,7 @@ public partial class Main : Node3D
 			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take  F4: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take/talk/search  Tab: kit  H: dressing  L: light  F4: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
@@ -632,6 +645,71 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	/// <summary>The kit: HUD, both pages of the kit screen, attachments fitted (red dot, suppressor, light, laser) seen
+	/// in the field, and magazines being used up by reloads.</summary>
+	private async Task RunKitTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[kit] shot {name}");
+		}
+		_hud.Visible = false;
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		await Frames(90);
+		var k = _kit;
+		GD.Print($"[kit] start: loaded {k.Loaded}/{k.LoadedMag.Capacity}, {k.Magazines} magazines, {k.Bandages} dressings, {k.Kg:0.0} kg");
+		// Fire five, reload: one magazine fewer, the part-used one back in the vest.
+		for (int i = 0; i < 5; i++) { _weapon.TestFire(); await Frames(8); }
+		int before = k.Magazines;
+		k.SwapMagazine();
+		GD.Print($"[kit] fired 5 and reloaded: loaded {k.Loaded}, magazines {before} -> {k.Magazines} (the old one has {k.AllItems.Where(i => i.Def.Kind == DeadRecon.Gear.ItemKind.Magazine).Min(i => i.Rounds)} rounds)");
+		await Frames(20);
+		await Shot("1_hud");
+		_kitScreen.Open(0);
+		await Frames(30);
+		await Shot("2_backpack");
+		_kitScreen.TestShow(k.Pack.Items.FirstOrDefault(i => i.Def == DeadRecon.Gear.ItemDef.Suppressor), 0);
+		await Frames(5);
+		await Shot("3_backpack_details");
+		_kitScreen.TestShow(null, 1);
+		await Frames(40);
+		await Shot("4_gunsmith_factory");
+		foreach (var id in new[] { "optic_reddot", "muzzle_suppressor", "side_flashlight" })
+		{
+			var item = k.AllItems.First(i => i.Def.Id == id);
+			GD.Print($"[kit] fit {id}: {k.Fit(item.Def.Slot, item) ?? "ok"}");
+		}
+		k.Paint("tan");
+		await Frames(60);
+		await Shot("5_gunsmith_fitted");
+		_kitScreen.Close();
+		await Frames(30);
+		await Shot("6_hud_fitted");
+		GD.Print($"[kit] suppressed {_weapon.Suppressed}, light {_weapon.HasLight}");
+		_weapon.ForceAim(true);
+		await Frames(30);
+		await Shot("7_red_dot");
+		_weapon.ForceAim(false);
+		_time.Hour = 22.5f;
+		k.LightOn = true;
+		await Frames(40);
+		await Shot("8_flashlight_night");
+		k.Add(DeadRecon.Gear.ItemDef.Laser);
+		var laser = k.AllItems.First(i => i.Def == DeadRecon.Gear.ItemDef.Laser);
+		GD.Print($"[kit] fit laser: {k.Fit(DeadRecon.Gear.Slot.Side, laser) ?? "ok"}");
+		k.LightOn = true;
+		await Frames(40);
+		await Shot("9_laser_night");
+		GetTree().Quit();
+	}
+
 	/// <summary>Village life: a day in the nearest village (work, lunch, bed), gunfire panic, the headman's news,
 	/// help and job (its checkpoint guards killed), and shooting a villager. Prints what everyone is doing.</summary>
 	private async Task RunLifeTest(string dir)
