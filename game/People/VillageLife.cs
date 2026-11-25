@@ -114,7 +114,7 @@ public partial class VillageLife : Node
         int stalls = layout.Stalls.Count;
         for (int i = 0; i < count; i++)
         {
-            var role = i == 0 && site.Kind != "hamlet" && _headmanFace != "" ? Villager.Role.Headman
+            var role = i == 0 && _headmanFace != "" ? Villager.Role.Headman
                      : i - 1 < stalls && i > 0 ? Villager.Role.Vendor
                      : fields.Count > 0 && rng.Randf() < .6f ? Villager.Role.Farmer : Villager.Role.Homebody;
             float a = i * 2.4f, r = 1.9f + (i % 3) * .7f;
@@ -234,10 +234,28 @@ public partial class VillageLife : Node
         {
             var h = folk.Headman;
             if (h == null || h.IsDead || h.Indoors || h.GlobalPosition.DistanceTo(Player.GlobalPosition) > TalkDistance) continue;
-            Hud.Prompt($"F   Talk to {folk.HeadmanName}, headman of {Towns.Sites[index].Name}");
+            Hud.Prompt($"F   Talk to {folk.HeadmanName}, {(Towns.Sites[index].Kind == "hamlet" ? "elder" : "headman")} of {Towns.Sites[index].Name}");
             if (fPressed) StartTalk(index, h);
             return;
         }
+        // Anyone else: a few words, and where to find the one in charge.
+        foreach (var (index, folk) in _folk)
+            foreach (var v in folk.People)
+            {
+                if (v == folk.Headman || v.IsDead || v.Indoors || v.Lost || v.GlobalPosition.DistanceTo(Player.GlobalPosition) > TalkDistance) continue;
+                Hud.Prompt("F   Talk");
+                if (!fPressed) return;
+                var level = Support.LevelAt(index);
+                string title = Towns.Sites[index].Kind == "hamlet" ? "the elder" : "the headman";
+                string where = folk.Headman is { IsDead: false } h2 ? (h2.Indoors ? "at home, probably asleep" : $"over there, {Compass(h2.GlobalPosition - v.GlobalPosition)}") : "...we don't have one any more";
+                v.Say(level switch
+                {
+                    Support.Level.Hostile => $"I've got nothing to say to you. Talk to {title} if you must. {where}.",
+                    Support.Level.Wary => $"Me? I just grow rice. If you want something, {folk.HeadmanName} is {title}. {where}.",
+                    _ => $"Hello again! If you need anything, {folk.HeadmanName} is {title}. {where}.",
+                });
+                return;
+            }
     }
 
     private void StartTalk(int site, Villager headman)
@@ -261,7 +279,7 @@ public partial class VillageLife : Node
     {
         var level = Support.LevelAt(_talkSite);
         var options = new List<string> { "1   Any news?", "2   We could use some help.", "3   Anything I can do for you?" };
-        Hud.ShowDialog($"{_folk[_talkSite].HeadmanName}, headman of {Towns.Sites[_talkSite].Name}  ·  {Support.Describe(level)}", text, options.ToArray());
+        Hud.ShowDialog($"{_folk[_talkSite].HeadmanName}, {(Towns.Sites[_talkSite].Kind == "hamlet" ? "elder" : "headman")} of {Towns.Sites[_talkSite].Name}  ·  {Support.Describe(level)}", text, options.ToArray());
     }
 
     private void EndTalk()

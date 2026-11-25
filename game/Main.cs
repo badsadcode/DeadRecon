@@ -30,6 +30,8 @@ public partial class Main : Node3D
 	private Mission _mission = null!;
 	private Weather _weather = null!;
 	private TimeOfDay _time = null!;
+	private static Vector3? _continueFrom;
+	private static float _continueYaw;
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
 	private DeadRecon.Gear.Kit _kit = null!;
@@ -83,6 +85,12 @@ public partial class Main : Node3D
 		_walker = new Walker { ProcessMode = ProcessModeEnum.Disabled };
 		AddChild(_walker);
 		var spawn = FindSpawn();
+		// After a finished operation the next one starts where you were standing.
+		if (_continueFrom is { } here)
+		{
+			spawn = (here with { Y = _world.HeightAt(here.X, here.Z) + .2f }, _continueYaw);
+			_continueFrom = null;
+		}
 		_spawn = spawn;
 		_walker.GlobalPosition = spawn.position;
 		_walker.Look(spawn.yaw, -4);
@@ -326,7 +334,10 @@ public partial class Main : Node3D
 		// Dead or done: Enter starts a new operation (same jungle, new camp; felled trees stay felled).
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _mission != null
 			&& (_walker.Dead || _mission.State == Mission.Phase.Complete))
+		{
+			if (!_walker.Dead && !_walker.Flying) { _continueFrom = _walker.GlobalPosition; _continueYaw = Mathf.RadToDeg(_walker.Rotation.Y); }
 			GetTree().ReloadCurrentScene();
+		}
 	}
 
 	/// <summary>

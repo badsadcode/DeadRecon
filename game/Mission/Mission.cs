@@ -308,6 +308,12 @@ public partial class Mission : Node3D
     public override void _UnhandledInput(InputEvent e)
     {
         if (State == Phase.Briefing && (e is InputEventKey { Pressed: true } || e is InputEventMouseButton { Pressed: true })) Begin();
+        // Debrief: Space puts it away and you carry on in the jungle (Enter still starts the next operation).
+        if (State == Phase.Complete && _panelBack.Visible && e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Space })
+        {
+            _panelBack.Visible = false;
+            GetViewport().SetInputAsHandled();
+        }
     }
 
     private void TakeIntel()
@@ -336,7 +342,7 @@ public partial class Mission : Node3D
                            (SearchProgress > 0 ? $"   searching... {SearchProgress * 100:0}%" :
                             Player.GlobalPosition.DistanceTo(IntelAt) < 2.4f ? "   hold F to take it" : ""),
             Phase.Extract => $"OBJECTIVE: reach extraction (green smoke)   {Flat(d):0} m {dir}",
-            Phase.Complete => $"{OperationName}: COMPLETE",
+            Phase.Complete => "Operation complete. Enter: next operation, wherever you are",
             _ => $"{OperationName}: FAILED",
         };
     }
@@ -382,7 +388,7 @@ public partial class Mission : Node3D
                 $"Time: {(int)Elapsed / 60}:{(int)Elapsed % 60:00}    Shots fired: {Rifle.ShotsFired}    Guards down: {down}/{Guards.Count}\n" +
                 $"Times spotted: {alerts}    Trees felled: {trees}{(trees > 0 ? " (the forestry department has questions)" : "")}\n\n" +
                 $"{verdict}\n\n" +
-                "Press Enter for a new operation.";
+                "Enter: next operation (it starts where you're standing).\nSpace: keep exploring. Enter works any time.";
         }
         else if (State == Phase.Failed)
         {
