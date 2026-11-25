@@ -514,7 +514,7 @@ public partial class Villager : CharacterBody3D, IDamageable
 
     public void Bark(string kind)
     {
-        var lines = Lines[kind];
+        var lines = DeadRecon.Data.Content.LineSets("villager_lines", Lines)[kind];
         int last = _lastLine.TryGetValue(kind, out var l) ? l : -1;
         int pick = _rng.RandiRange(0, lines.Length - 1);
         if (pick == last && lines.Length > 1) pick = (pick + 1) % lines.Length;

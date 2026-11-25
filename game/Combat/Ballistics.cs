@@ -41,11 +41,11 @@ public partial class Ballistics : Node3D
     public override void _ExitTree() { if (Current == this) Current = null; }
 
     /// <summary>Fire one bullet. <paramref name="done"/> is called once: with the hit, or null if it flew out of range.</summary>
-    public void Fire(Vector3 origin, Vector3 direction, Vector3 visualFrom, Rid exclude, Action<Hit?> done, bool enemy = false)
+    public void Fire(Vector3 origin, Vector3 direction, Vector3 visualFrom, Rid exclude, Action<Hit?> done, bool enemy = false, bool tracer = true)
     {
         var b = new Bullet { Pos = origin, Origin = origin, Vel = direction.Normalized() * MuzzleVelocity, Done = done };
         b.Exclude.Add(exclude);
-        if (DeadRecon.UI.Settings.Tracers)
+        if (DeadRecon.UI.Settings.Tracers && tracer)
         {
             b.Visual = new Comet { Enemy = enemy, Head = visualFrom, Tail = visualFrom };
             AddChild(b.Visual);

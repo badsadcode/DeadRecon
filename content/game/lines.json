@@ -1,0 +1,269 @@
+{
+  "guard_lines": {
+    "sentry": [
+      "Stand here, they said. Watch the radio, they said.",
+      "This radio has more friends than me.",
+      "I've counted every leaf on that tree. Twice.",
+      "Nobody ever attacks on MY shift. Nobody ever visits either."
+    ],
+    "mutter": [
+      "Twelve hours. In the rain. Again.",
+      "Who even needs a radio tower out here?",
+      "My boots are full of jungle.",
+      "Guard the trees, they said. Great career move.",
+      "If one more mosquito bites me...",
+      "I had a nice desk job once."
+    ],
+    "suspicious": [
+      "Hm?",
+      "...what was that?",
+      "Hello? Monkey?",
+      "I saw that. Probably."
+    ],
+    "steps": [
+      "Footsteps? Wonderful.",
+      "Who's stomping around?",
+      "Is that you, Dave?"
+    ],
+    "investigate": [
+      "Fine. I'll go look. Slowly.",
+      "If this is the monkey again...",
+      "Coming. Don't make me run."
+    ],
+    "gunfire": [
+      "Gunfire?! Of course. Of course there's gunfire.",
+      "Shots! On MY shift!",
+      "Oh, come ON."
+    ],
+    "alert": [
+      "THERE you are!",
+      "I KNEW IT!",
+      "Contact! Ugh, the paperwork...",
+      "Intruder! Stop being an intruder!"
+    ],
+    "lost": [
+      "Where'd you go?",
+      "Come out, I just want to shoot you a little.",
+      "Hiding? Rude."
+    ],
+    "giveup": [
+      "...must've been the monkey.",
+      "Not paid enough for this.",
+      "Nobody here. Back to being miserable."
+    ],
+    "hurt": [
+      "Ow!",
+      "Rude!",
+      "That's going in my report!",
+      "Ow! My lunch!"
+    ],
+    "dead": [
+      "...told them I needed a vacation.",
+      "...tell my mother... I was right..."
+    ],
+    "won": [
+      "And STAY down.",
+      "That's what you get. Ugh, more paperwork."
+    ],
+    "flank": [
+      "I'll go round! Keep him busy!",
+      "Going left! Or right! One of those!",
+      "Cover me, I'm being clever!"
+    ],
+    "flanked": [
+      "Got you from the side!",
+      "Surprise! ...wait, I'm the surprise."
+    ],
+    "alarm": [
+      "CONTACT! Everybody up! ...Everybody? Hello?",
+      "Over here! OVER HERE! Ugh.",
+      "We've got company! The rude kind!"
+    ],
+    "alarmheard": [
+      "What? Coming! Coming!",
+      "Ugh, FINE, I'm coming!",
+      "Hold on, I'm coming! Don't win without me!"
+    ],
+    "body": [
+      "Dave?! ...DAVE!",
+      "Oh no. Oh, that's going to be paperwork.",
+      "Man down! Who's going to watch the radio now?!"
+    ],
+    "cover": [
+      "Taking cover! Very bravely!",
+      "Behind the tree! The tree is my friend!",
+      "You can't hit me, I'm a tree now!"
+    ],
+    "tree": [
+      "Did a tree just... fall over? By itself?",
+      "TIMBER! ...wait. Who said that?",
+      "The jungle is falling apart. Like my career.",
+      "Trees don't just DO that."
+    ],
+    "squashed": [
+      "...a TREE? Seriously?",
+      "...killed by... forestry..."
+    ]
+  },
+  "guard_chats": [
+    [
+      "Seen anything?",
+      "Just mosquitoes. Thousands of them."
+    ],
+    [
+      "Is it my shift or yours?",
+      "It's always your shift."
+    ],
+    [
+      "Smells like rain.",
+      "Everything here smells like rain."
+    ],
+    [
+      "You ever think about leaving?",
+      "Every four minutes."
+    ],
+    [
+      "Did you hear that?",
+      "No. And neither did you."
+    ],
+    [
+      "Who's cooking tonight?",
+      "Not Dave. Never again Dave."
+    ],
+    [
+      "The radio's been quiet.",
+      "The radio is the only one here with any sense."
+    ],
+    [
+      "Nice day for it.",
+      "For what?"
+    ]
+  ],
+  "villager_lines": {
+    "hostile": [
+      "You again. The rice remembers what you did.",
+      "Walk on, soldier. Walk far.",
+      "No. Whatever it is: no.",
+      "My grandmother has a stick. She knows about you."
+    ],
+    "wary": [
+      "Mm. Boots off the paddy, please.",
+      "Another man with a gun. Lovely.",
+      "Don't scare the chickens.",
+      "Hello. Please don't explode anything."
+    ],
+    "friendly": [
+      "Ah! Our friend with the loud stick!",
+      "Hello! You look hungry. You always look hungry.",
+      "Good day! Mind the buffalo. Metaphorically.",
+      "Back again? Bring rain, not trouble."
+    ],
+    "loyal": [
+      "Our hero! Sit, sit, eat something!",
+      "The children made a song about you. It's mostly about your boots.",
+      "Whatever you need. Within reason. And rice."
+    ],
+    "chat": [
+      "The rain is late. Or early. The rain does what it wants.",
+      "My cousin says the soldiers are scared of frogs.",
+      "Fifty years I plant rice. Rice still doesn't say thank you.",
+      "If it rains again I'm building a boat.",
+      "The headman says patience. The headman has a bad back.",
+      "Somebody stole my good hat.",
+      "Who keeps leaving half a tree on the path?",
+      "Did you sell the duck? ...You ATE the duck?!",
+      "The checkpoint boys took a whole sack again.",
+      "My knees can tell you the weather. They say: no."
+    ],
+    "panic": [
+      "Inside! Everyone inside!",
+      "Not again!",
+      "Gunfire! Get the children!",
+      "Why is it always during lunch?!"
+    ],
+    "aimed": [
+      "Please! Not the face!",
+      "I'm just a farmer!",
+      "Point that somewhere else!",
+      "I have nothing! Only rice!"
+    ],
+    "hurt": [
+      "AAH! Why?!",
+      "I'm hit! Over rice?!",
+      "Help! He shot me!"
+    ],
+    "work": [
+      "One plant, two plant... ow, my back.",
+      "Grow, you little green tyrants.",
+      "Sun, rain, back pain. Farming."
+    ],
+    "rain": [
+      "Rain! Under the house, quick!",
+      "Here it comes. Everybody under a roof!",
+      "My washing!"
+    ],
+    "morning": [
+      "Morning. Tea. Then rice. Then more rice.",
+      "Who let the rooster near my window again?"
+    ],
+    "night": [
+      "Goodnight, everyone! Lock up the chickens.",
+      "Bed. Finally. My back is filing a complaint."
+    ],
+    "sell": [
+      "Fresh jars! Hardly cracked!",
+      "Rice! Rice! Also... rice!",
+      "Best prices in the jungle! Only prices in the jungle!"
+    ]
+  },
+  "radio_banter": [
+    {
+      "who": "HQ",
+      "text": "Whoever took the last tin of peaches: we know. We are watching. We are hungry."
+    },
+    {
+      "who": "HQ",
+      "text": "Reminder: the jungle is not a toilet. Well. It is. But be discreet."
+    },
+    {
+      "who": "Echo Two",
+      "text": "Echo Two to anyone. Has anyone seen my left boot? ...Echo Two out."
+    },
+    {
+      "who": "HQ",
+      "text": "Weather office says rain. Weather office always says rain. Weather office is usually right."
+    },
+    {
+      "who": "Supply",
+      "text": "Supply run delayed. The mule has opinions."
+    },
+    {
+      "who": "HQ",
+      "text": "Morale officer reports morale is fine. Morale officer has been asked to stop writing reports in crayon."
+    },
+    {
+      "who": "Bravo Six",
+      "text": "Bravo Six here. We found a frog the size of a dog. It's ours now. His name is Kevin."
+    },
+    {
+      "who": "HQ",
+      "text": "Radio discipline, people. That means less singing."
+    },
+    {
+      "who": "Echo Two",
+      "text": "Found the boot. There was a frog in it. Not Kevin. Different frog."
+    },
+    {
+      "who": "HQ",
+      "text": "To whoever keeps knocking trees over: forestry has filed a complaint. We have filed it under 'jungle'."
+    },
+    {
+      "who": "Supply",
+      "text": "If you find building supplies at their camps, keep them. They owe us for the peaches."
+    },
+    {
+      "who": "HQ",
+      "text": "Night patrols: check your torch. Then switch it off. Then never switch it on near the enemy."
+    }
+  ]
+}

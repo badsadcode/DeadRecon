@@ -15,10 +15,11 @@ namespace DeadRecon.Base;
 /// </summary>
 public static class Chatter
 {
+    public sealed record Line(string Who, string Text);
     public static readonly List<(string Clock, string Who, string Text)> Log = new();
     private static readonly Random Rng = new();
 
-    private static readonly (string Who, string Text)[] Banter =
+    public static readonly (string Who, string Text)[] Banter =
     {
         ("HQ", "Whoever took the last tin of peaches: we know. We are watching. We are hungry."),
         ("HQ", "Reminder: the jungle is not a toilet. Well. It is. But be discreet."),
@@ -40,8 +41,9 @@ public static class Chatter
         var recent = Log.Skip(Math.Max(0, Log.Count - 6)).Select(l => l.Text).ToHashSet();
         var rumours = Rumours(home).Where(r => !recent.Contains(r.Item2)).ToList();
         if (rumours.Count > 0 && Rng.NextDouble() < .6) return rumours[Rng.Next(rumours.Count)];
-        var banter = Banter.Where(b => !recent.Contains(b.Text)).ToArray();
-        return banter.Length > 0 ? banter[Rng.Next(banter.Length)] : Banter[Rng.Next(Banter.Length)];
+        var all = DeadRecon.Data.Content.Get("radio_banter", Banter.Select(b => new Line(b.Who, b.Text)).ToArray()).Select(l => (l.Who, l.Text)).ToArray();
+        var banter = all.Where(b => !recent.Contains(b.Text)).ToArray();
+        return banter.Length > 0 ? banter[Rng.Next(banter.Length)] : all[Rng.Next(all.Length)];
     }
 
     public static void Add(string who, string text)

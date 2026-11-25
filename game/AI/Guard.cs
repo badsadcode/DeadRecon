@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DeadRecon.Combat;
 using DeadRecon.Player;
 using DeadRecon.World;
@@ -25,6 +26,9 @@ public partial class Guard : CharacterBody3D, IDamageable
     public BakedWorld World = null!;
     public Vector3 Home;
     public string GunScene = "res://assets/weapons/BadGun_rifle_vietnam_97232.glb";
+    /// <summary>Which gun he carries (WeaponDef id): sets the model, his damage, and what he drops.</summary>
+    public string WeaponId = DeadRecon.Gear.WeaponDef.Default;
+    private float ShotDamage => DeadRecon.Gear.WeaponDef.Get(WeaponId).GuardDamage;
     /// <summary>Patrol loop radius (m). A sentry uses a tiny one: he stands his post and looks around.</summary>
     public float PatrolMin = 12, PatrolMax = 22;
     public bool Sentry;
@@ -58,7 +62,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     private Vector3 _lastVel;
     private readonly Queue<Vector3> _searchPlan = new();
     private static float _chatCooldown = 8;
-    private static readonly (string A, string B)[] Chats =
+    public static readonly (string A, string B)[] Chats =
     {
         ("Seen anything?", "Just mosquitoes. Thousands of them."),
         ("Is it my shift or yours?", "It's always your shift."),
@@ -107,7 +111,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     private readonly Dictionary<string, int> _lastLine = new();
 
     // ---- the grumpiness (the most important system in the game)
-    private static readonly Dictionary<string, string[]> Lines = new()
+    public static readonly Dictionary<string, string[]> Lines = new()
     {
         ["sentry"] = new[] { "Stand here, they said. Watch the radio, they said.", "This radio has more friends than me.",
                              "I've counted every leaf on that tree. Twice.", "Nobody ever attacks on MY shift. Nobody ever visits either." },
@@ -507,7 +511,9 @@ public partial class Guard : CharacterBody3D, IDamageable
             if (g == this || g.State != Mood.Patrol || g.GlobalPosition.DistanceTo(GlobalPosition) > 14) continue;
             _chatCooldown = _rng.RandfRange(35, 60);
             Chats_++;
-            var (a, b) = Chats[_rng.RandiRange(0, Chats.Length - 1)];
+            var pairs = DeadRecon.Data.Content.Get("guard_chats", Chats.Select(c => new[] { c.A, c.B }).ToArray());
+            var pick = pairs[_rng.RandiRange(0, pairs.Length - 1)];
+            var (a, b) = (pick[0], pick.Length > 1 ? pick[1] : "...");
             Say(a);
             var other = g;
             GetTree().CreateTimer(2.6).Timeout += () => { if (IsInstanceValid(other) && other.State == Mood.Patrol) other.Say(b); };
@@ -539,7 +545,7 @@ public partial class Guard : CharacterBody3D, IDamageable
             && _rng.Randf() < .15f * DeadRecon.UI.Settings.GuardAccuracy)
         {
             Effects.Tracer(this, from, Target.Chest, enemy: true);
-            Target.TakeHit(_rng.RandfRange(11, 18), Target.Chest, eye);
+            Target.TakeHit(ShotDamage * _rng.RandfRange(.6f, 1f), Target.Chest, eye);
             return;
         }
         var dir = (aim - eye).Normalized();
@@ -726,7 +732,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (_rng.Randf() < chance)
         {
             Effects.Tracer(this, from, Target.Chest - (Target.Chest - from).Normalized() * .4f, enemy: true);
-            Target.TakeHit(_rng.RandfRange(11, 18), Target.Chest, eye);
+            Target.TakeHit(ShotDamage * _rng.RandfRange(.6f, 1f), Target.Chest, eye);
             return;
         }
         // Miss: kick up dirt somewhere near the player so you know you're being shot at.
@@ -876,7 +882,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void Bark(string kind)
     {
-        var lines = Lines[kind];
+        var lines = DeadRecon.Data.Content.LineSets("guard_lines", Lines)[kind];
         int last = _lastLine.TryGetValue(kind, out var l) ? l : -1;
         int pick = _rng.RandiRange(0, lines.Length - 1);
         if (pick == last && lines.Length > 1) pick = (pick + 1) % lines.Length;
@@ -927,7 +933,7 @@ public partial class Guard : CharacterBody3D, IDamageable
             _body = new SoldierBody
             {
                 // Own random source: looks must not change his patrol route or behaviour for a given seed.
-                CharacterScene = characters[(int)(Looks.Randi() % (uint)characters.Count)], GunScene = GunScene,
+                CharacterScene = characters[(int)(Looks.Randi() % (uint)characters.Count)], GunScene = DeadRecon.Gear.WeaponDef.Get(WeaponId).Model, WeaponId = WeaponId,
             };
             _rig.AddChild(_body);
             _head = new Node3D { Position = new Vector3(0, 1.52f, 0) };   // aim/look helper, invisible

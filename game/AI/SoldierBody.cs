@@ -18,6 +18,7 @@ public partial class SoldierBody : Node3D
 {
     public string CharacterScene = "";
     public string GunScene = "res://assets/weapons/BadGun_rifle_vietnam_97232.glb";
+    public string WeaponId = DeadRecon.Gear.WeaponDef.Default;
 
     /// <summary>Horizontal speed (m/s): picks Idle/Walk/Run and their playback speed.</summary>
     public float Speed { get; set; }
@@ -215,6 +216,10 @@ public partial class SoldierBody : Node3D
         var xf = _gun.GlobalTransform;
         var body = new RigidBody3D { Mass = 3.5f, CollisionLayer = 1 << 2, CollisionMask = 1, ContinuousCd = true };
         body.AddChild(new CollisionShape3D { Shape = new BoxShape3D { Size = new Vector3(.07f, .2f, .95f) }, Position = new Vector3(0, 0, .12f) });
+        // Somebody can pick it up (Kit: F near it).
+        body.SetMeta("weapon", WeaponId);
+        body.SetMeta("rounds", (int)GD.RandRange(DeadRecon.Gear.WeaponDef.Get(WeaponId).Capacity / 3, DeadRecon.Gear.WeaponDef.Get(WeaponId).Capacity));
+        body.AddToGroup("dropped_weapon");
         GetTree().CurrentScene.AddChild(body);
         body.GlobalTransform = xf.Orthonormalized();
         _gun.GetParent().RemoveChild(_gun);

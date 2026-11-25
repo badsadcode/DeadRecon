@@ -176,7 +176,7 @@ public partial class JobBoard : Node
                     spot = p with { Y = World.HeightAt(p.X, p.Z) };
                     break;
                 }
-                string[] names = { "Old Bao", "Uncle Tam", "Young Kiet", "Grandpa Lum", "Cousin Vinh", "Brother Hoa" };
+                string[] names = DeadRecon.Data.Content.Strings("lost_villager_names", new[] { "Old Bao", "Uncle Tam", "Young Kiet", "Grandpa Lum", "Cousin Vinh", "Brother Hoa" });
                 string who = names[rng.RandiRange(0, names.Length - 1)];
                 var lost = Life.SpawnLost(village, spot, who);
                 if (lost == null) return (null, "");

@@ -31,8 +31,11 @@ public static class RifleBuilder
 
     /// <summary>What each optic does when you aim.</summary>
     public sealed record OpticStats(float Fov, int Reticle, bool HideGun);   // Reticle: 0 scope, 1 red dot, 2 holo
-    public static OpticStats Optic(string id) => id switch
+    /// <summary>Reticle -1: iron sights (no overlay, the gun stays).</summary>
+    public static OpticStats Optic(string id, WeaponDef? w = null) => id switch
     {
+        "optic_stock" when w != null && w.Sight == "irons" => new(45, -1, false),
+        "optic_stock" when w != null => new(w.ScopeFov, 0, true),
         "optic_scope" => new(17, 0, true),
         "optic_reddot" => new(50, 1, false),
         "optic_holo" => new(44, 2, false),
@@ -42,9 +45,10 @@ public static class RifleBuilder
     /// <summary>Recoil, noise (gunshot hearing radius) and flash, multipliers.</summary>
     public static (float Recoil, float Noise, float Flash, float Sway) Handling(Loadout l)
     {
-        float recoil = 1, noise = 1, flash = 1, sway = 1;
-        if (l.Muzzle == "muzzle_suppressor") { recoil = .9f; noise = .3f; flash = 0; }
-        if (l.Muzzle == "muzzle_compensator") { recoil = .65f; noise = 1.15f; flash = 1.3f; }
+        var w = WeaponDef.Get(l.Weapon);
+        float recoil = w.Recoil, noise = w.Noise, flash = w.Noise < .5f ? 0 : 1, sway = 1;
+        if (l.Muzzle == "muzzle_suppressor") { recoil *= .9f; noise = Math.Min(noise, .3f); flash = 0; }
+        if (l.Muzzle == "muzzle_compensator") { recoil *= .65f; noise = Math.Max(noise, 1.15f); flash = 1.3f; }
         if (l.Underbarrel == "grip_vgrip") { recoil *= .85f; sway *= .85f; }
         if (l.Optic == "optic_stock") sway *= 1.05f;
         return (recoil, noise, flash, sway);
@@ -52,8 +56,10 @@ public static class RifleBuilder
 
     public static Rifle? Build(Loadout l, bool lights = true)
     {
-        if (!ResourceLoader.Exists(RifleScene)) return null;
-        var r = new Rifle { Model = ResourceLoader.Load<PackedScene>(RifleScene).Instantiate<Node3D>() };
+        var w = WeaponDef.Get(l.Weapon);
+        string scene = ResourceLoader.Exists(w.Model) ? w.Model : RifleScene;
+        if (!ResourceLoader.Exists(scene)) return null;
+        var r = new Rifle { Model = ResourceLoader.Load<PackedScene>(scene).Instantiate<Node3D>() };
         var m = r.Model;
         r.Trigger = m.FindChild("Trigger", true, false) as Node3D;
         r.Magazine = m.FindChild("Magazine", true, false) as Node3D;
@@ -64,7 +70,8 @@ public static class RifleBuilder
 
         var opticSocket = m.FindChild("SOCKET_Optic", true, false) is Node3D os ? InModel(m, os).Origin : new Vector3(0, .03f, .07f);
         var muzzlePart = m.FindChild("Muzzle", true, false) as Node3D;
-        var barrelEnd = muzzlePart != null ? InModel(m, muzzlePart).Origin : new Vector3(0, 0, .36f);
+        var barrelEnd = m.FindChild("SOCKET_Barrel_End", true, false) is Node3D be ? InModel(m, be).Origin
+                      : muzzlePart != null ? InModel(m, muzzlePart).Origin : new Vector3(0, 0, .36f);
         var support = m.FindChild("SOCKET_Hand_Support", true, false) is Node3D hs ? InModel(m, hs).Origin : new Vector3(0, -.04f, .14f);
         // No underbarrel/side sockets on this rifle: clamp to the handguard's measured skin instead.
         Vector3 under, side;
@@ -85,7 +92,7 @@ public static class RifleBuilder
             if (m.FindChild("Optic", true, false) is Node3D stock) stock.Visible = false;
             if (optic.FindChild("SOCKET_ADS", true, false) is Node3D oa) r.Ads = opticSocket + InModel(optic, oa).Origin;
             // Red dots and holos: eye further back than BadGun's socket, so the sight is a window, not the whole view.
-            if (Optic(l.Optic).Reticle != 0) r.Ads += new Vector3(0, 0, -.09f);
+            if (Optic(l.Optic, w).Reticle != 0) r.Ads += new Vector3(0, 0, -.09f);
         }
         // Muzzle device.
         if (l.Muzzle != "muzzle_stock" && Attach(m, l.Muzzle, barrelEnd) is { } muzzle)

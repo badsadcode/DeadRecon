@@ -67,7 +67,7 @@ public partial class IconBaker : Node
     }
 
     /// <summary>The whole rifle with this loadout.</summary>
-    public static string RifleKey(Loadout l) => $"rifle:{l.Optic}:{l.Muzzle}:{l.Side}:{l.Underbarrel}:{l.Paint}";
+    public static string RifleKey(Loadout l) => $"rifle:{l.Weapon}:{l.Optic}:{l.Muzzle}:{l.Side}:{l.Underbarrel}:{l.Paint}";
 
     public void RequestRifle(Loadout l) => Request(RifleKey(l), () => RifleBuilder.Build(l, lights: false)?.Model, new Vector2I(640, 240));
 

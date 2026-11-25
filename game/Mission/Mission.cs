@@ -93,9 +93,9 @@ public partial class Mission : Node3D
     private bool _cageOpen;
     private string _prisonerName = "";
 
-    private static readonly string[] Adjectives = { "Soggy", "Silent", "Muddy", "Crimson", "Sleepy", "Iron", "Damp", "Velvet", "Grumpy", "Thunder", "Lukewarm", "Humid", "Sticky", "Rusty", "Gentle", "Midnight" };
-    private static readonly string[] Nouns = { "Mango", "Heron", "Gecko", "Monsoon", "Kettle", "Buffalo", "Machete", "Mosquito", "Lantern", "Spoon", "Orchid", "Tapir", "Noodle", "Cobra", "Teapot", "Hammock" };
-    private static readonly (string Item, string Why)[] Intel =
+    public static readonly string[] Adjectives = { "Soggy", "Silent", "Muddy", "Crimson", "Sleepy", "Iron", "Damp", "Velvet", "Grumpy", "Thunder", "Lukewarm", "Humid", "Sticky", "Rusty", "Gentle", "Midnight" };
+    public static readonly string[] Nouns = { "Mango", "Heron", "Gecko", "Monsoon", "Kettle", "Buffalo", "Machete", "Mosquito", "Lantern", "Spoon", "Orchid", "Tapir", "Noodle", "Cobra", "Teapot", "Hammock" };
+    public static readonly (string Item, string Why)[] Intel =
     {
         ("the codebook", "Without it they can't read their own radio messages. They'll be furious. Quietly."),
         ("the patrol schedule", "We'd like to know when they're not looking. Apparently it's most of the time."),
@@ -104,7 +104,8 @@ public partial class Mission : Node3D
         ("the map case", "They've been drawing on our jungle. We'd like to see what."),
         ("the officer's diary", "Mostly complaints about the food, probably. But maybe not."),
     };
-    private static readonly string[] Prisoners = { "Sergeant Okafor", "Corporal Lindqvist", "Private Santos", "Lieutenant Mbeki", "Sergeant Kowalczyk", "Corporal Tran" };
+    public sealed record IntelDef(string Item, string Why);
+    public static readonly string[] Prisoners = { "Sergeant Okafor", "Corporal Lindqvist", "Private Santos", "Lieutenant Mbeki", "Sergeant Kowalczyk", "Corporal Tran" };
 
     public static string Describe(Op kind) => kind switch
     {
@@ -119,7 +120,9 @@ public partial class Mission : Node3D
     public static string NameFor(int seed)
     {
         var rng = new RandomNumberGenerator { Seed = (ulong)seed };
-        return $"Operation {Adjectives[rng.RandiRange(0, Adjectives.Length - 1)]} {Nouns[rng.RandiRange(0, Nouns.Length - 1)]}";
+        var adj = DeadRecon.Data.Content.Strings("operation_adjectives", Adjectives);
+        var noun = DeadRecon.Data.Content.Strings("operation_nouns", Nouns);
+        return $"Operation {adj[rng.RandiRange(0, adj.Length - 1)]} {noun[rng.RandiRange(0, noun.Length - 1)]}";
     }
 
     // ================================================================= planning (before planting)
@@ -131,10 +134,12 @@ public partial class Mission : Node3D
         Kind = kind;
         OperationName = NameFor(seed);
         _rng = new RandomNumberGenerator { Seed = (ulong)seed * 7 + 1 };
-        var intel = Intel[_rng.RandiRange(0, Intel.Length - 1)];
+        var intels = DeadRecon.Data.Content.Get("intel", Array.ConvertAll(Intel, i => new IntelDef(i.Item, i.Why)));
+        var intel = intels[_rng.RandiRange(0, intels.Length - 1)];
         IntelName = kind == Op.Radio ? "the field radio" : intel.Item;
         _why = intel.Why;
-        _prisonerName = Prisoners[_rng.RandiRange(0, Prisoners.Length - 1)];
+        var prisoners = DeadRecon.Data.Content.Strings("soldier_names", Prisoners);
+        _prisonerName = prisoners[_rng.RandiRange(0, prisoners.Length - 1)];
         TreeScatter.Clearings.Clear();
         if (kind == Op.None) { State = Phase.Complete; GD.Print("[mission] at home: no operation"); return; }
 

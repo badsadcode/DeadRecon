@@ -21,8 +21,12 @@ public partial class Weapon : Node3D
     public string ScenePath = "res://assets/weapons/BadGun_rifle_vietnam_97232.glb";
 
     // Test-gun numbers (BadGun doesn't ship ballistics; these are ours).
-    private const float RoundsPerMinute = 600, Range = 900, HipSpread = .014f, AimSpread = .0006f;   // ~2' scoped: the rifle itself is accurate
-    private const float Damage = 34; // three to the body; the guard triples it for headshots
+    private const float Range = 900;
+    private WeaponDef Def => Kit.Current?.Weapon ?? WeaponDef.Get(null);
+    private float RoundsPerMinute => Def.Rpm;
+    private float HipSpread => Def.HipSpread;
+    private float AimSpread => Def.AimSpread;
+    private float Damage => Def.Damage;   // rifle 34: three to the body; the guard triples it for headshots
     private const float RaiseFov = 40, ScopeFov = 11, HipFov = 70, AimSpeed = 7;  // ScopeFov 11 = roughly 6x
     private static readonly Vector3 HipOffset = new(.16f, -.21f, -.36f); // where the grip sits relative to the eye
 
@@ -31,7 +35,8 @@ public partial class Weapon : Node3D
     public int ShotsFired { get; private set; }
     /// <summary>A bullet hit a person (true = that killed them). The HUD shows a hit marker.</summary>
     public event Action<bool>? HitConfirmed;
-    public int MagazineCapacity => Kit.Current?.LoadedMag.Capacity ?? 20;
+    public int MagazineCapacity => Kit.Current?.Capacity ?? 20;
+    public string WeaponName => Def.Name;
     public bool Suppressed => _handling.Noise < .5f;
     public bool HasLight => _light != null || _laserFrom != null;
     public string OpticName => Kit.Current is { } k && ItemDef.All.TryGetValue(k.Loadout.Optic, out var d) ? d.Name : "";
@@ -113,7 +118,8 @@ public partial class Weapon : Node3D
         if (_magazine != null) _magazineRest = _magazine.Position;
         if (_charging != null) _chargingRest = _charging.Position;
         _adsInModel = r.Ads;
-        _optic = RifleBuilder.Optic(loadout.Optic);
+        _optic = RifleBuilder.Optic(loadout.Optic, WeaponDef.Get(loadout.Weapon));
+        Automatic = WeaponDef.Get(loadout.Weapon).Auto;
         _handling = RifleBuilder.Handling(loadout);
 
         _flashLight = new OmniLight3D { LightColor = new Color(1, .72f, .38f), LightEnergy = 0, OmniRange = 6, ShadowEnabled = false };
@@ -157,7 +163,7 @@ public partial class Weapon : Node3D
         Walker.Camera.Fov = scoped ? _optic.Fov : Mathf.Lerp(HipFov, Math.Max(RaiseFov, _optic.Fov), ease);
         Walker.SensitivityScale = Walker.Camera.Fov / HipFov;
         _model.Visible = !(scoped && _optic.HideGun);
-        _scope.Visible = scoped;
+        _scope.Visible = scoped && _optic.Reticle >= 0;
         if (scoped)
         {
             var vs = GetViewport().GetVisibleRect().Size;
@@ -176,7 +182,7 @@ public partial class Weapon : Node3D
         bool newPull = trigger && !_triggerWasDown;
         _triggerWasDown = trigger;
         if (captured && trigger && (Automatic || newPull) && !Walker.FireLockedUntilRelease && _cooldown <= 0 && !Reloading) Fire();
-        if (captured && Input.IsPhysicalKeyPressed(Key.V) && !_vWasDown) { Automatic = !Automatic; _click.Play(); }
+        if (captured && Input.IsPhysicalKeyPressed(Key.V) && !_vWasDown && Def.Auto) { Automatic = !Automatic; _click.Play(); }
         _vWasDown = Input.IsPhysicalKeyPressed(Key.V);
         _noMagsToast -= dt;
         if (captured && Input.IsPhysicalKeyPressed(Key.R) && !Reloading && Ammo < MagazineCapacity)
@@ -200,8 +206,7 @@ public partial class Weapon : Node3D
         Position = HipOffset.Lerp(adsOffset, ease) + bob + new Vector3(0, 0, _kick * .05f);
         Rotation = new Vector3(_kick * (1 - ease * .6f) * .09f, 0, 0);
         if (_trigger != null) _trigger.Rotation = new Vector3(_cooldown > 0 ? _triggerTravel : 0, 0, 0);
-        // A long magazine is longer.
-        if (_magazine != null) _magazine.Scale = new Vector3(1, Kit.Current?.LoadedMag == ItemDef.Mag30 ? 1.35f : 1, 1);
+
 
         if (_flash >= 0)
         {
@@ -253,6 +258,12 @@ public partial class Weapon : Node3D
         var origin = cam.Origin;
         if (DeadRecon.Combat.Ballistics.Current is not { } ballistics) return;
         ballistics.Fire(origin, dir, muzzle, Walker.GetRid(), hit => Land(hit, origin, dir));
+        // Shotguns: the rest of the pellets, in a cone round the first.
+        for (int p = 1; p < Def.Pellets; p++)
+        {
+            var pd = (dir + cam.Basis.X * _rng.RandfRange(-Def.PelletSpread, Def.PelletSpread) + cam.Basis.Y * _rng.RandfRange(-Def.PelletSpread, Def.PelletSpread)).Normalized();
+            ballistics.Fire(origin, pd, muzzle, Walker.GetRid(), hit => Land(hit, origin, pd), tracer: false);
+        }
     }
 
     /// <summary>Where a bullet ended up (called when it arrives, a few frames after the shot).</summary>
@@ -407,7 +418,7 @@ public partial class Weapon : Node3D
         if (_charging != null) _charging.Position = _chargingRest + _chargingAxis * _chargingTravel * ch;
         if (_reload >= 1.25f && _reload - dt < 1.25f) _clack.Play();
         if (_reload >= 1.5f && _reload - dt < 1.5f) _click.Play();
-        if (_reload >= 1.75f) { _reload = -1; Kit.Current?.SwapMagazine(); }
+        if (_reload >= 1.75f) { _reload = -1; Kit.Current?.Reload(); }
     }
 
     private bool LaserOn => _laserFrom != null && Kit.Current?.LightOn == true;

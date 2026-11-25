@@ -159,7 +159,7 @@ public partial class Main : Node3D
 		Guard AddGuard(Vector3 home, bool sentry)
 		{
 			home.Y = _world.HeightAt(home.X, home.Z) + .2f;
-			var g = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry, PatrolMin = 16, PatrolMax = 26 };
+			var g = new Guard { WeaponId = DeadRecon.Gear.WeaponDef.ForGuard(new RandomNumberGenerator { Seed = (ulong)(home.X * 7919 + home.Z * 104729 + 3) }).Id, Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry, PatrolMin = 16, PatrolMax = 26 };
 			AddChild(g);
 			g.GlobalPosition = home;
 			_guards.Add(g);
@@ -195,7 +195,7 @@ public partial class Main : Node3D
 			SpawnGuard = (home, sentry) =>
 			{
 				home.Y = _world.HeightAt(home.X, home.Z) + .2f;
-				var g = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry, PatrolMin = 8, PatrolMax = 16 };
+				var g = new Guard { WeaponId = DeadRecon.Gear.WeaponDef.ForGuard(new RandomNumberGenerator { Seed = (ulong)(home.X * 7919 + home.Z * 104729 + 3) }).Id, Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry, PatrolMin = 8, PatrolMax = 16 };
 				AddChild(g);
 				g.GlobalPosition = home;
 				_guards.Add(g);
@@ -213,7 +213,7 @@ public partial class Main : Node3D
 				Spawn = (home, sentry, setup) =>
 				{
 					home.Y = _world.HeightAt(home.X, home.Z) + .2f;
-					var g = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry };
+					var g = new Guard { WeaponId = DeadRecon.Gear.WeaponDef.ForGuard(new RandomNumberGenerator { Seed = (ulong)(home.X * 7919 + home.Z * 104729 + 3) }).Id, Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry };
 					setup?.Invoke(g);
 					AddChild(g);
 					g.GlobalPosition = home;
@@ -282,6 +282,30 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string dumpContent = Arg("dumpcontent", "");
+		if (dumpContent != "")
+		{
+			// Every editable section, written out as the starting point for content/game (and for modders).
+			_ = DeadRecon.Gear.ItemDef.All; _ = DeadRecon.Gear.WeaponDef.All;
+			DeadRecon.Data.Content.LineSets("guard_lines", Guard.Lines);
+			DeadRecon.Data.Content.Get("guard_chats", Guard.Chats.Select(c => new[] { c.A, c.B }).ToArray());
+			DeadRecon.Data.Content.LineSets("villager_lines", DeadRecon.People.Villager.Lines);
+			DeadRecon.Data.Content.Strings("operation_adjectives", Mission.Adjectives);
+			DeadRecon.Data.Content.Strings("operation_nouns", Mission.Nouns);
+			DeadRecon.Data.Content.Get("intel", Array.ConvertAll(Mission.Intel, i => new Mission.IntelDef(i.Item, i.Why)));
+			DeadRecon.Data.Content.Strings("soldier_names", Mission.Prisoners);
+			DeadRecon.Data.Content.Get("radio_banter", DeadRecon.Base.Chatter.Banter.Select(b => new DeadRecon.Base.Chatter.Line(b.Who, b.Text)).ToArray());
+			DeadRecon.Data.Content.Strings("lost_villager_names", new[] { "Old Bao", "Uncle Tam", "Young Kiet", "Grandpa Lum", "Cousin Vinh", "Brother Hoa" });
+			GD.Print($"[content] mods: {string.Join(", ", DeadRecon.Data.Content.Loaded)}; black rifle damage {DeadRecon.Gear.WeaponDef.Get("rifle_4121").Damage}; nouns {DeadRecon.Data.Content.Strings("operation_nouns", Mission.Nouns).Length}; mutter lines {DeadRecon.Data.Content.LineSets("guard_lines", Guard.Lines)["mutter"].Length}");
+			DeadRecon.Data.Content.Dump(dumpContent, new()
+			{
+				["items.json"] = new[] { "items" }, ["weapons.json"] = new[] { "weapons" },
+				["names.json"] = new[] { "operation_adjectives", "operation_nouns", "intel", "soldier_names", "lost_villager_names" },
+				["lines.json"] = new[] { "guard_lines", "guard_chats", "villager_lines", "radio_banter" },
+			});
+			GetTree().Quit();
+			return;
+		}
 		string soundTest = Arg("soundtest", "");
 		if (soundTest != "")
 		{
@@ -1144,6 +1168,20 @@ public partial class Main : Node3D
 		k.LightOn = true;
 		await Frames(40);
 		await Shot("9_laser_night");
+		// Every gun in the list: swap to it, fire, reload, photograph (daylight).
+		_time.Hour = 10; k.LightOn = false;
+		foreach (var w in DeadRecon.Gear.WeaponDef.All.Values)
+		{
+			k.SwapWeapon(w.Id, w.Capacity);
+			await Frames(15);
+			for (int i = 0; i < Math.Min(3, w.Capacity); i++) { _weapon.TestFire(); await Frames(6); }
+			int before2 = k.Loaded;
+			k.Add(DeadRecon.Gear.ItemDef.Mag30, 4, quiet: true);
+			k.Reload();
+			GD.Print($"[kit] {w.Id}: fired to {before2}, reloaded to {k.Loaded}/{w.Capacity}, {_weapon.LastHit}");
+			await Shot($"w_{w.Id}");
+		}
+		k.SwapWeapon(DeadRecon.Gear.WeaponDef.Default, 20);
 		// The map: wait for the painting, set a waypoint, look.
 		_time.Hour = 10; k.LightOn = false;
 		var start = _walker.GlobalPosition;

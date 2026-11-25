@@ -82,7 +82,7 @@ public partial class Kit : Node
     public int Magazines => AllItems.Count(i => i.Def.Kind == ItemKind.Magazine && i.Rounds > 0);
     public int Medical => AllItems.Where(i => i.Def.Kind == ItemKind.Medical).Sum(i => i.Count);
     public int Bandages => AllItems.Where(i => i.Def == ItemDef.Bandage).Sum(i => i.Count);
-    public float Kg => AllItems.Sum(i => i.Kg) + 4.2f;   // + the rifle
+    public float Kg => AllItems.Sum(i => i.Kg) + Weapon.Kg;
     public bool Healing => _healLeft > 0;
 
     public override void _Ready()
@@ -174,6 +174,37 @@ public partial class Kit : Node
 
     /// <summary>The swap at the end of a reload: the old magazine goes back in the vest (if it has rounds left;
     /// empties are dropped), the new one goes in the rifle.</summary>
+    /// <summary>The gun in your hands.</summary>
+    public WeaponDef Weapon => WeaponDef.Get(Loadout.Weapon);
+    public int Capacity => Weapon.Capacity;
+
+    /// <summary>Top the gun up from the magazines you carry (fullest first; several if it's a big box). Empty ones
+    /// are thrown away, part-used ones stay in the bag. Returns false if there was nothing to load.</summary>
+    public bool Reload()
+    {
+        int need = Capacity - Loaded, got = 0;
+        while (need > 0 && NextMagazine() is { } next)
+        {
+            var mag = next.Mag;
+            int take = Math.Min(need, mag.Rounds);
+            mag.Rounds -= take; need -= take; got += take;
+            if (mag.Rounds <= 0) GridOf(mag)?.Items.Remove(mag);
+        }
+        Loaded += got;
+        Changed?.Invoke(); Save();
+        return got > 0;
+    }
+
+    /// <summary>Change guns (a dropped one you picked up): what's fitted moves over; the rounds in it come with it.</summary>
+    public string SwapWeapon(string id, int rounds)
+    {
+        string old = Loadout.Weapon;
+        Loadout = Loadout with { Weapon = id };
+        Loaded = Math.Min(rounds, Capacity);
+        Changed?.Invoke(); LoadoutChanged?.Invoke(); Save();
+        return old;
+    }
+
     public bool SwapMagazine()
     {
         if (NextMagazine() is not { } next) return false;
@@ -199,7 +230,7 @@ public partial class Kit : Node
     }
 
     /// <summary>Tests: a full magazine in the rifle without using one up.</summary>
-    public void TestTopUp() => Loaded = LoadedMag.Capacity;
+    public void TestTopUp() => Loaded = Capacity;
 
     // ================================================================= the rifle
 
@@ -281,6 +312,15 @@ public partial class Kit : Node
             Hud.Prompt("F   Search the body");
             if (fKey && !_fWas && captured) Search(body);
         }
+        else if (!Player.Dead && DroppedGunNear() is { } gun)
+        {
+            var def = WeaponDef.Get((string)gun.GetMeta("weapon"));
+            if (def.Id != Loadout.Weapon)
+            {
+                Hud.Prompt($"F   Swap for the {def.Name.ToLower()} ({(int)gun.GetMeta("rounds")} rounds)");
+                if (fKey && !_fWas && captured) PickUp(gun);
+            }
+        }
         else if (!Player.Dead)
             for (int i = 0; i < Loot.Count; i++)
             {
@@ -319,6 +359,38 @@ public partial class Kit : Node
         if (rng.Randf() < .35f && Add(ItemDef.Bandage, 1, quiet: true)) found.Add("a dressing");
         if (rng.Randf() < .08f && Add(ItemDef.Mag30, 1, quiet: true)) found.Add("a long magazine");
         Hud.Toast(found.Count > 0 ? $"Found {string.Join(", ", found)}" : "Nothing useful. Or no room for it.");
+    }
+
+    private RigidBody3D? DroppedGunNear()
+    {
+        RigidBody3D? best = null;
+        foreach (var n in GetTree().GetNodesInGroup("dropped_weapon"))
+            if (n is RigidBody3D b && b.GlobalPosition.DistanceTo(Player.GlobalPosition) < 2 && (best == null || b.GlobalPosition.DistanceTo(Player.GlobalPosition) < best.GlobalPosition.DistanceTo(Player.GlobalPosition)))
+                best = b;
+        return best;
+    }
+
+    /// <summary>Take the dropped gun; yours goes on the ground where it was (so you can change your mind).</summary>
+    public void PickUp(RigidBody3D gun)
+    {
+        string id = (string)gun.GetMeta("weapon");
+        int rounds = (int)gun.GetMeta("rounds");
+        var at = gun.GlobalTransform;
+        int mine = Loaded;
+        string old = SwapWeapon(id, rounds);
+        gun.QueueFree();
+        var oldDef = WeaponDef.Get(old);
+        if (ResourceLoader.Exists(oldDef.Model))
+        {
+            var body = new RigidBody3D { Mass = 3.5f, CollisionLayer = 1 << 2, CollisionMask = 1, ContinuousCd = true };
+            body.AddChild(new CollisionShape3D { Shape = new BoxShape3D { Size = new Vector3(.07f, .2f, .95f) }, Position = new Vector3(0, 0, .12f) });
+            body.AddChild(ResourceLoader.Load<PackedScene>(oldDef.Model).Instantiate<Node3D>());
+            body.SetMeta("weapon", old); body.SetMeta("rounds", mine);
+            body.AddToGroup("dropped_weapon");
+            GetTree().CurrentScene.AddChild(body);
+            body.GlobalTransform = new Transform3D(at.Basis.Orthonormalized(), at.Origin + Vector3.Up * .3f);
+        }
+        Hud.Toast($"Took the {WeaponDef.Get(id).Name.ToLower()}");
     }
 
     // ================================================================= keeping it

@@ -1,0 +1,80 @@
+{
+  "operation_adjectives": [
+    "Soggy",
+    "Silent",
+    "Muddy",
+    "Crimson",
+    "Sleepy",
+    "Iron",
+    "Damp",
+    "Velvet",
+    "Grumpy",
+    "Thunder",
+    "Lukewarm",
+    "Humid",
+    "Sticky",
+    "Rusty",
+    "Gentle",
+    "Midnight"
+  ],
+  "operation_nouns": [
+    "Mango",
+    "Heron",
+    "Gecko",
+    "Monsoon",
+    "Kettle",
+    "Buffalo",
+    "Machete",
+    "Mosquito",
+    "Lantern",
+    "Spoon",
+    "Orchid",
+    "Tapir",
+    "Noodle",
+    "Cobra",
+    "Teapot",
+    "Hammock"
+  ],
+  "intel": [
+    {
+      "item": "the codebook",
+      "why": "Without it they can't read their own radio messages. They'll be furious. Quietly."
+    },
+    {
+      "item": "the patrol schedule",
+      "why": "We'd like to know when they're not looking. Apparently it's most of the time."
+    },
+    {
+      "item": "the radio crystals",
+      "why": "No crystals, no radio. No radio, no reinforcements."
+    },
+    {
+      "item": "the supply ledger",
+      "why": "Somebody is ordering 400 crates of canned peaches. We need to know who."
+    },
+    {
+      "item": "the map case",
+      "why": "They've been drawing on our jungle. We'd like to see what."
+    },
+    {
+      "item": "the officer's diary",
+      "why": "Mostly complaints about the food, probably. But maybe not."
+    }
+  ],
+  "soldier_names": [
+    "Sergeant Okafor",
+    "Corporal Lindqvist",
+    "Private Santos",
+    "Lieutenant Mbeki",
+    "Sergeant Kowalczyk",
+    "Corporal Tran"
+  ],
+  "lost_villager_names": [
+    "Old Bao",
+    "Uncle Tam",
+    "Young Kiet",
+    "Grandpa Lum",
+    "Cousin Vinh",
+    "Brother Hoa"
+  ]
+}
