@@ -118,6 +118,20 @@ public partial class Main : Node3D
 		}
 		_guard = AddGuard(_mission.Camp + new Vector3(0, 0, -2), sentry: false);
 		AddGuard(_mission.IntelAt + new Vector3(.8f, 0, 1.6f), sentry: true);
+		// Bigger camps on higher difficulty and some operations: extra patrollers walking wider loops.
+		var extra = new RandomNumberGenerator { Seed = (ulong)seed * 31 + 7 };
+		int extras = DeadRecon.UI.Settings.Difficulty switch
+		{
+			DeadRecon.UI.Settings.Level.Recruit => 0,
+			DeadRecon.UI.Settings.Level.Veteran => extra.RandiRange(1, 2),
+			_ => extra.RandiRange(0, 1),
+		};
+		for (int k = 0; k < extras; k++)
+		{
+			float a = extra.Randf() * MathF.Tau;
+			var g = AddGuard(_mission.Camp + new Vector3(MathF.Cos(a), 0, MathF.Sin(a)) * 12, sentry: false);
+			g.PatrolMin = 24; g.PatrolMax = 38;
+		}
 		_mission.Trees = _trees;
 		AddChild(_mission);
 
@@ -797,6 +811,10 @@ public partial class Main : Node3D
 		for (int f = 0; f < 600 && !_terrain.Settled; f++) await Frames(1);
 		await Seconds(2);
 
+		// ---- 0. Camp life while nobody knows we're here (hovering high = ignored).
+		await Seconds(45);
+		GD.Print($"[squad] calm 45 s: {Guard.Chats_} chats, {Guard.SitsStarted} sit-downs; {_guards.Count} guards in camp");
+
 		// ---- 1. Spotted: alarm and cover
 		Vector3 BestSpot()
 		{
@@ -839,6 +857,7 @@ public partial class Main : Node3D
 			if (!peekShot && patrol.Peeking && samples > 8) { peekShot = true; await Shot("2_peeking"); }
 		}
 		_weapon.ForceAim(false);
+		GD.Print($"[squad] flanks started {Guard.FlanksStarted}, suppressive shots {Guard.SuppressShots}; sentry flanking now {sentry.Flanking}, {sentry.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m from me");
 		GD.Print($"[squad] 15 s of fight: patrol hiding {hidden * 100 / samples}%, peeking {peeking * 100 / samples}%, " +
 				 $"a trunk between us {wood * 100 / samples}% of the time; he hit me {_walker.HitsTaken - shotsAtMe} times; sentry: {sentry.State}");
 

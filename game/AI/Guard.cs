@@ -44,6 +44,26 @@ public partial class Guard : CharacterBody3D, IDamageable
     private bool _peeking, _hurry;
     private float _coverTimer, _coverCheck;
     private readonly HashSet<Guard> _bodiesSeen = new();
+    private Vector3? _flankPoint;
+    private float _flankTime, _sitTimer = 20, _sitting;
+    private Vector3 _lastVel;
+    private readonly Queue<Vector3> _searchPlan = new();
+    private static float _chatCooldown = 8;
+    private static readonly (string A, string B)[] Chats =
+    {
+        ("Seen anything?", "Just mosquitoes. Thousands of them."),
+        ("Is it my shift or yours?", "It's always your shift."),
+        ("Smells like rain.", "Everything here smells like rain."),
+        ("You ever think about leaving?", "Every four minutes."),
+        ("Did you hear that?", "No. And neither did you."),
+        ("Who's cooking tonight?", "Not Dave. Never again Dave."),
+        ("The radio's been quiet.", "The radio is the only one here with any sense."),
+        ("Nice day for it.", "For what?"),
+    };
+    /// <summary>True while he's circling round to your side.</summary>
+    public bool Flanking => _flankPoint != null;
+    public bool Sitting => _sitting > 0;
+    public static int FlanksStarted, SuppressShots, Chats_, SitsStarted;
     private const float AlarmRadius = 75;
     /// <summary>0..1: how sure he is that someone is there. 0.3 suspicious, 0.7 investigating, 1 alerted.</summary>
     public float Suspicion { get; private set; }
@@ -93,6 +113,8 @@ public partial class Guard : CharacterBody3D, IDamageable
         ["hurt"] = new[] { "Ow!", "Rude!", "That's going in my report!", "Ow! My lunch!" },
         ["dead"] = new[] { "...told them I needed a vacation.", "...tell my mother... I was right..." },
         ["won"] = new[] { "And STAY down.", "That's what you get. Ugh, more paperwork." },
+        ["flank"] = new[] { "I'll go round! Keep him busy!", "Going left! Or right! One of those!", "Cover me, I'm being clever!" },
+        ["flanked"] = new[] { "Got you from the side!", "Surprise! ...wait, I'm the surprise." },
         ["alarm"] = new[] { "CONTACT! Everybody up! ...Everybody? Hello?", "Over here! OVER HERE! Ugh.", "We've got company! The rude kind!" },
         ["alarmheard"] = new[] { "What? Coming! Coming!", "Ugh, FINE, I'm coming!", "Hold on, I'm coming! Don't win without me!" },
         ["body"] = new[] { "Dave?! ...DAVE!", "Oh no. Oh, that's going to be paperwork.", "Man down! Who's going to watch the radio now?!" },
@@ -179,9 +201,11 @@ public partial class Guard : CharacterBody3D, IDamageable
             float stance = Target.Crouching ? .45f : 1f;
             float motion = Target.Running ? 1.5f : Target.Velocity.LengthSquared() < .1f ? .55f : 1f;
             float focus = cos > .85f ? 1f : .6f;                         // corner of the eye is less sharp
-            float rate = near * stance * motion * focus * 1.4f * (alert ? 4 : 1) * DeadRecon.UI.Settings.GuardSight;
+            float rate = near * stance * motion * focus * 1.4f * (alert ? 4 : 1) * DeadRecon.UI.Settings.GuardSight * AlertnessFactor;
             Suspicion = Math.Min(1, Suspicion + rate * dt);
             _lastKnown = Target.GlobalPosition;
+            var tv = Target.Velocity; tv.Y = 0;
+            if (tv.LengthSquared() > .3f) _lastVel = tv;
             _sinceSeen = 0;
         }
         else
@@ -277,9 +301,17 @@ public partial class Guard : CharacterBody3D, IDamageable
         {
             case Mood.Patrol:
             {
-                if (Suspicion >= .3f) { Enter(Mood.Suspicious, "suspicious"); return (here, 0, _lastKnown); }
+                if (Suspicion >= .3f) { _sitting = 0; Enter(Mood.Suspicious, "suspicious"); return (here, 0, _lastKnown); }
                 _mutter -= dt;
                 if (_mutter <= 0) { _mutter = _rng.RandfRange(16, 30); Bark(Sentry ? "sentry" : "mutter"); }
+                TryChat(dt);
+                // The sentry sits down now and then (and sees less: a sitting man looks at the fire, not the jungle).
+                if (Sentry)
+                {
+                    if (_sitting > 0) { _sitting -= dt; return (here, 0, here - GlobalTransform.Basis.Z); }
+                    _sitTimer -= dt;
+                    if (_sitTimer <= 0) { _sitTimer = _rng.RandfRange(25, 45); _sitting = _rng.RandfRange(12, 22); SitsStarted++; }
+                }
                 var p = _patrol[_patrolIndex];
                 if (Flat(here - p) < 1.2f || _stuck > 2.5f)
                 {
@@ -305,6 +337,14 @@ public partial class Guard : CharacterBody3D, IDamageable
 
             case Mood.Alert:
             {
+                // Flanker: circle round to the player's side while the other guard keeps him busy.
+                if (_flankPoint is { } fp)
+                {
+                    _flankTime += dt;
+                    if (_seen && _flankTime > 2) { _flankPoint = null; Bark("flanked"); }
+                    else if (Flat(here - fp) < 2.5f || _stuck > 2.5f || _flankTime > 25) _flankPoint = null;
+                    else return (fp, RunSpeed, null);
+                }
                 // Fight from behind a trunk: hide, step out to shoot a burst, hide again.
                 _coverCheck -= dt;
                 if (_coverCheck <= 0)
@@ -335,6 +375,12 @@ public partial class Guard : CharacterBody3D, IDamageable
                             _cooldown -= dt;
                             if (_reaction <= 0 && _cooldown <= 0) Shoot();
                         }
+                        else if (_sinceSeen < 5)
+                        {
+                            // Can't see you, knows where you were: keep your head down.
+                            _cooldown -= dt;
+                            if (_cooldown <= 0) Suppress();
+                        }
                         return (_peekSpot, InvestigateSpeed, _lastKnown);
                     }
                     if (_sinceSeen < 10) return (spot, InvestigateSpeed, _lastKnown);   // hiding, waiting to peek
@@ -355,7 +401,8 @@ public partial class Guard : CharacterBody3D, IDamageable
                     if (Flat(here - _lastKnown) < 2.5f || _stuck > 3) { StartSearch(); return (here, 0, null); }
                     return (_lastKnown, RunSpeed, null);
                 }
-                return (here, 0, _lastKnown);                                 // just lost sight: keep aiming there a moment
+                if (_sinceSeen > .6f) { _cooldown -= dt; if (_cooldown <= 0) Suppress(); }
+                return (here, 0, _lastKnown);                                 // just lost sight: keep firing there a moment
 
             case Mood.Search:
                 if (_seen) { Suspicion = 1; EnterAlert(); return (here, 0, _lastKnown); }
@@ -382,7 +429,99 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (fresh) TimesAlerted++;
         Suspicion = 1;
         Enter(Mood.Alert, fresh ? "alert" : null);
-        if (fresh) { _reaction = ReactionTime; _cooldown = 0; _burst = 0; _warningShots = 3; _cover = null; _peeking = false; RaiseAlarm(); }
+        if (fresh) { _reaction = ReactionTime; _cooldown = 0; _burst = 0; _warningShots = 3; _cover = null; _peeking = false; RaiseAlarm(); PlanFlank(); }
+    }
+
+    /// <summary>
+    /// If a colleague is already in the fight and nobody is flanking yet, go round the side: a point beside where the
+    /// player was, at right angles to the line from that colleague, on whichever side is closer to us.
+    /// </summary>
+    private void PlanFlank()
+    {
+        Guard? holder = null;
+        foreach (var g in All)
+        {
+            if (g == this || g.State != Mood.Alert) continue;
+            if (g.Flanking) return;
+            holder ??= g;
+        }
+        if (holder == null) return;
+        var line = _lastKnown - holder.GlobalPosition; line.Y = 0;
+        if (line.LengthSquared() < 1) return;
+        line = line.Normalized();
+        var side = line.Cross(Vector3.Up);
+        if (side.Dot(GlobalPosition - _lastKnown) < 0) side = -side;
+        var p = _lastKnown + side * 17 - line * 3;
+        p.Y = World.HeightAt(p.X, p.Z);
+        _flankPoint = p;
+        _flankTime = 0;
+        FlanksStarted++;
+        Bark("flank");
+    }
+
+    /// <summary>A hidden or seated guard has a narrower world: used by perception.</summary>
+    private float AlertnessFactor => _sitting > 0 ? .6f : 1;
+
+    /// <summary>Chat with a nearby calm colleague: one line each, a few seconds apart.</summary>
+    private void TryChat(float dt)
+    {
+        if (!Sentry) return;                          // the sentry starts conversations (he's bored)
+        _chatCooldown -= dt;
+        if (_chatCooldown > 0) return;
+        foreach (var g in All)
+        {
+            if (g == this || g.State != Mood.Patrol || g.GlobalPosition.DistanceTo(GlobalPosition) > 14) continue;
+            _chatCooldown = _rng.RandfRange(35, 60);
+            Chats_++;
+            var (a, b) = Chats[_rng.RandiRange(0, Chats.Length - 1)];
+            Say(a);
+            var other = g;
+            GetTree().CreateTimer(2.6).Timeout += () => { if (IsInstanceValid(other) && other.State == Mood.Patrol) other.Say(b); };
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Suppressive fire: a burst at where he last saw you. Mostly it keeps your head down, but if you're still
+    /// there and in his line (just hidden by leaves), it can find you.
+    /// </summary>
+    private void Suppress()
+    {
+        SuppressShots++;
+        if (_burst <= 0) _burst = _rng.RandiRange(2, 4);
+        _burst--;
+        _cooldown = _burst > 0 ? .22f : _rng.RandfRange(1.6f, 2.8f);
+        _flash = 0;
+        _shot.PitchScale = .95f + _rng.Randf() * .1f;
+        _shot.Play();
+        DeadRecon.Audio.Ambience.Current?.Echo(GlobalPosition);
+
+        var eye = GlobalPosition + Vector3.Up * EyeHeight;
+        var from = _muzzle?.GlobalPosition ?? eye;
+        var aim = _lastKnown + Vector3.Up * _rng.RandfRange(.4f, 1.6f) + new Vector3(_rng.RandfRange(-1.5f, 1.5f), 0, _rng.RandfRange(-1.5f, 1.5f));
+        // Still there, and only leaves in the way (no trunk, no hill)? A small chance to hit.
+        if (Target.GlobalPosition.DistanceTo(_lastKnown) < 2.5f && !Target.Dead
+            && Foliage.RaycastTrunk(eye, Target.Chest) == null && LineOfSight(eye, Target.Chest)
+            && _rng.Randf() < .15f * DeadRecon.UI.Settings.GuardAccuracy)
+        {
+            Effects.Tracer(this, from, Target.Chest, enemy: true);
+            Target.TakeHit(_rng.RandfRange(11, 18), Target.Chest, eye);
+            return;
+        }
+        var dir = (aim - eye).Normalized();
+        float dist = eye.DistanceTo(aim) + 25;
+        var q = PhysicsRayQueryParameters3D.Create(eye, eye + dir * dist);
+        q.Exclude = new Godot.Collections.Array<Rid> { GetRid(), Target.GetRid() };
+        var hit = GetWorld3D().DirectSpaceState.IntersectRay(q);
+        var end = hit.Count > 0 ? (Vector3)hit["position"] : eye + dir * dist;
+        var head = Target.Camera.GlobalPosition;
+        var seg = end - eye;
+        float along = Math.Clamp((head - eye).Dot(seg) / seg.LengthSquared(), 0, 1);
+        if ((eye + seg * along).DistanceTo(head) < 3.5f) Target.HearCrack();
+        var trunk = Foliage.RaycastTrunk(eye, end);
+        Effects.Tracer(this, from, trunk?.Point ?? end, enemy: true);
+        if (trunk is { } t) { Effects.Splinters(this, t.Point, t.Normal, dir); Foliage.ReportHit(t.Plant, t.Point, dir, 30); }
+        else if (hit.Count > 0) Effects.Impact(this, (Vector3)hit["position"], (Vector3)hit["normal"]);
     }
 
     /// <summary>Shout: guards within earshot (less in rain) come running to roughly where he's looking.</summary>
@@ -403,7 +542,11 @@ public partial class Guard : CharacterBody3D, IDamageable
     private void HearAlarm(Vector3 where)
     {
         if (State is Mood.Alert or Mood.Dead) return;
-        _lastKnown = where + new Vector3(_rng.RandfRange(-4, 4), 0, _rng.RandfRange(-4, 4));
+        // Head for fighting distance on his own side of the trouble, not into the middle of it.
+        var back = GlobalPosition - where; back.Y = 0;
+        float d = back.Length();
+        var near = d > 1 ? where + back / d * Math.Min(14, d * .6f) : where;
+        _lastKnown = near + new Vector3(_rng.RandfRange(-4, 4), 0, _rng.RandfRange(-4, 4));
         Suspicion = Math.Max(Suspicion, .9f);
         _hurry = true;
         Enter(Mood.Investigate, "alarmheard");
@@ -411,14 +554,35 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void StartSearch()
     {
-        _cover = null; _peeking = false;
+        _cover = null; _peeking = false; _flankPoint = null;
         Enter(Mood.Search, "lost");
         _searchLeft = SearchTime;
+        // A plan, not random wandering: where you'd have gone (the way you were heading), then behind the nearest
+        // trees (where you'd hide), then around.
+        _searchPlan.Clear();
+        if (_lastVel.LengthSquared() > .3f)
+        {
+            var heading = _lastVel.Normalized();
+            _searchPlan.Enqueue(_lastKnown + heading * 7);
+            _searchPlan.Enqueue(_lastKnown + heading * 15);
+        }
+        var trunks = Foliage.TrunksNear(_lastKnown, 12);
+        trunks.Sort((a, b) => new Vector2(a.X - _lastKnown.X, a.Z - _lastKnown.Z).Length().CompareTo(new Vector2(b.X - _lastKnown.X, b.Z - _lastKnown.Z).Length()));
+        int n = 0;
+        foreach (var t in trunks)
+        {
+            if (t.TrunkRadius < .2f || n >= 3) continue;
+            var away = new Vector3(t.X - GlobalPosition.X, 0, t.Z - GlobalPosition.Z).Normalized();
+            _searchPlan.Enqueue(new Vector3(t.X, 0, t.Z) + away * (Math.Max(t.TrunkRadius, t.FootRadius) + 1.2f));   // its far side
+            n++;
+        }
+        _lastVel = Vector3.Zero;
         PickSearchPoint();
     }
 
     private void PickSearchPoint()
     {
+        if (_searchPlan.Count > 0) { _searchPoint = _searchPlan.Dequeue(); return; }
         float a = _rng.Randf() * MathF.Tau, r = _rng.RandfRange(4, 14);
         _searchPoint = _lastKnown + new Vector3(MathF.Cos(a) * r, 0, MathF.Sin(a) * r);
     }
@@ -604,7 +768,7 @@ public partial class Guard : CharacterBody3D, IDamageable
                 _steps.Play();
             }
         }
-        bool crouchWanted = State == Mood.Alert && InCover && !_peeking;
+        bool crouchWanted = (State == Mood.Alert && InCover && !_peeking) || (_sitting > 0 && State == Mood.Patrol);
         if (_body != null)
         {
             // The character animates itself; tell it what we're doing.
@@ -661,6 +825,20 @@ public partial class Guard : CharacterBody3D, IDamageable
     }
 
     // ================================================================= barks and the ?/! icon
+
+    /// <summary>Say a specific line (chat).</summary>
+    public void Say(string line)
+    {
+        if (State == Mood.Dead) return;
+        _bubble.Text = line;
+        _bubbleLeft = 3.8f;
+        if (_voice != null && Target.GlobalPosition.DistanceTo(GlobalPosition) < 80)
+        {
+            _voice.Stream = DeadRecon.Audio.Synth.Voice(line, _voicePitch, _voiceSeed);
+            _voice.Play();
+        }
+        GD.Print($"[guard] \"{line}\"");
+    }
 
     private void Bark(string kind)
     {
