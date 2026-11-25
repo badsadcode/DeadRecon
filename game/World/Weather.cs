@@ -46,6 +46,17 @@ public partial class Weather : Node3D
     public int LightningStrikes { get; private set; }
 
     private GpuParticles3D _rain = null!, _splash = null!;
+    private static ShaderMaterial? _rainMat;
+    private StandardMaterial3D? _splashMat;
+
+    /// <summary>The light the rain is seen in (TimeOfDay: the fog colour, brightness of the scene).</summary>
+    public void SetRainLight(Color light, float bright)
+    {
+        var tint = light * (.6f + .5f * bright) + new Color(.05f, .055f, .06f);   // a touch of its own sheen, so night rain still reads
+        _rainMat?.SetShaderParameter("tint", tint);
+        _rainMat?.SetShaderParameter("opacity", .2f + .1f * bright);
+        if (_splashMat != null) _splashMat.AlbedoColor = new Color(tint.R, tint.G, tint.B, .2f + .2f * bright);
+    }
     private AudioStreamPlayer _patter = null!, _roar = null!;
     private float _nextChange = 150, _nextLightning = 10, _flash = -1;
     /// <summary>0..1 lightning brightness right now.</summary>
@@ -186,7 +197,7 @@ public partial class Weather : Node3D
             DrawPass1 = new QuadMesh
             {
                 Size = new Vector2(.05f, .05f),
-                Material = new StandardMaterial3D
+                Material = _splashMat = new StandardMaterial3D
                 {
                     AlbedoColor = new Color(.85f, .9f, .95f, .45f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
                     ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, BillboardMode = BaseMaterial3D.BillboardModeEnum.Particles,
@@ -220,7 +231,7 @@ public partial class Weather : Node3D
     /// <summary>A drop streak: two crossed thin quads (never seen edge-on), stretched along its fall by AlignY.</summary>
     private static ArrayMesh Streak()
     {
-        const float W = .012f, H = .55f;
+        const float W = .007f, H = .55f;
         var v = new[]
         {
             new Vector3(-W, -H, 0), new Vector3(W, -H, 0), new Vector3(W, H, 0), new Vector3(-W, H, 0),
@@ -241,11 +252,8 @@ public partial class Weather : Node3D
         grad.AddPoint(.5f, new Color(1, 1, 1, 1));
         grad.SetColor(grad.GetPointCount() - 1, new Color(1, 1, 1, 0));
         var tex = new GradientTexture2D { Gradient = grad, FillFrom = new Vector2(0, 0), FillTo = new Vector2(0, 1), Width = 4, Height = 64 };
-        mesh.SurfaceSetMaterial(0, new StandardMaterial3D
-        {
-            AlbedoColor = new Color(.78f, .82f, .88f, .32f), AlbedoTexture = tex, Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        });
+        _rainMat = new ShaderMaterial { Shader = GD.Load<Shader>("res://game/World/rain.gdshader") };
+        mesh.SurfaceSetMaterial(0, _rainMat);
         return mesh;
     }
 

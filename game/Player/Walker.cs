@@ -207,6 +207,74 @@ public partial class Walker : CharacterBody3D, IDamageable
         return Math.Clamp(room / LeanOffset, 0, 1);
     }
 
+    /// <summary>On a ladder now (climbing: W up, S down, Space lets go).</summary>
+    public bool Climbing => _ladder != null;
+    private DeadRecon.World.Ladders.Ladder? _ladder;
+    private float _climbCooldown;
+
+    /// <summary>Ladders: walk into one facing it and you're on it. W climbs, S goes down, at the top you step off onto
+    /// the deck, at the bottom off onto the ground; Space jumps off. Returns true while climbing.</summary>
+    private bool Climb(float dt, Vector2 input)
+    {
+        _climbCooldown -= dt;
+        var feet = GlobalPosition;
+        if (_ladder == null)
+        {
+            if (_climbCooldown > 0) return false;
+            var forward = (-Transform.Basis.Z with { Y = 0 }).Normalized();
+            var wish = (Transform.Basis * new Vector3(input.X, 0, input.Y)) with { Y = 0 };
+            // At the bottom: walk into it (from the front or at an angle).
+            if (DeadRecon.World.Ladders.At(feet) is { } l && feet.Y < l.Top.Y - .4f)
+            {
+                DeadRecon.UI.Hud.Prompt("W   Climb the ladder");
+                if (input.Y >= 0 || forward.Dot(-l.Out) < -.1f) return false;
+                _ladder = l;
+            }
+            // At the top: walk toward the ladder side and you take hold of it to climb down.
+            else if (DeadRecon.World.Ladders.TopAt(feet) is { } top)
+            {
+                DeadRecon.UI.Hud.Prompt("Walk to the edge: climb down");
+                if (wish.LengthSquared() < .01f || wish.Normalized().Dot(top.Out) < .5f) return false;
+                _ladder = top;
+                GlobalPosition = top.Top + top.Out * .42f + Vector3.Down * 1.6f;
+                Velocity = Vector3.Zero;
+            }
+            else return false;
+        }
+        var lad = _ladder;
+        float span = Mathf.Max(.1f, lad.Top.Y - lad.Bottom.Y);
+        float t = Mathf.Clamp((feet.Y - lad.Bottom.Y) / span, 0, 1);
+        var rail = lad.Bottom.Lerp(lad.Top, t) + lad.Out * .42f;          // hang just in front of the rungs
+        float climb = -input.Y * 2.1f;
+        if (Math.Abs(climb) < .01f) DeadRecon.UI.Hud.Prompt("W up  ·  S down  ·  Space let go");
+        if (Input.IsPhysicalKeyPressed(Key.Space)) { Leave(lad.Out * 3 + Vector3.Up * 2); return false; }
+        var v = new Vector3((rail.X - feet.X) * 10, climb, (rail.Z - feet.Z) * 10);
+        Velocity = v;
+        MoveAndSlide();
+        _eye = Mathf.MoveToward(_eye, EyeHeight, dt * 3);
+        Camera.Position = new Vector3(0, _eye, 0);
+        ApplyLook();
+        // Rungs creak a little.
+        _stepNoise -= Math.Abs(climb) * dt;
+        if (_stepNoise <= 0 && Math.Abs(climb) > .1f) { _stepNoise = .45f; PlayStep(); }
+        // Head at the deck (or over the top): pull yourself up onto it.
+        if (GlobalPosition.Y >= lad.Top.Y - 2.05f && climb > 0 && (IsOnCeiling() || GlobalPosition.Y >= lad.Top.Y - .05f))
+        {
+            // Over the top and onto the deck.
+            GlobalPosition = lad.Top - lad.Out * .9f + Vector3.Up * .15f;
+            Leave(Vector3.Zero);
+        }
+        else if (climb < 0 && (IsOnFloor() && GlobalPosition.Y < lad.Bottom.Y + .4f)) Leave(lad.Out * 1.5f);
+        return _ladder != null;
+    }
+
+    private void Leave(Vector3 push)
+    {
+        _ladder = null;
+        _climbCooldown = .6f;
+        Velocity = push;
+    }
+
     public override void _PhysicsProcess(double delta)
     {
         float dt = (float)delta;
@@ -240,6 +308,8 @@ public partial class Walker : CharacterBody3D, IDamageable
             GlobalPosition += move.LimitLength(1) * (fast ? FlyFast : FlySpeed) * dt;
             return;
         }
+
+        if (Climb(dt, input)) return;
 
         Crouching = _crouchToggle || _slide > 0 || Input.IsPhysicalKeyPressed(Key.C);
         // Eye height on a critically damped spring: quick to start, eases into the end (a constant-speed move

@@ -50,9 +50,9 @@ public partial class TimeOfDay : Node
     {
         Current = this;
         Environment.VolumetricFogEnabled = DeadRecon.UI.Settings.LightShafts;
-        Environment.VolumetricFogAnisotropy = .7f;          // forward scattering: beams glow toward the sun
-        Environment.VolumetricFogLength = 90;
-        Environment.VolumetricFogDetailSpread = 1.6f;
+        Environment.VolumetricFogAnisotropy = .55f;          // forward scattering: beams glow toward the sun
+        Environment.VolumetricFogLength = 64;          // shorter: more of the grid close by, where the shafts are
+        Environment.VolumetricFogDetailSpread = 2.2f;
         Environment.VolumetricFogAmbientInject = .15f;
         Environment.TonemapMode = Godot.Environment.ToneMapper.Aces;
         Environment.SsaoIntensity = 1.5f;   // gentler contact shadows: under the canopy everything is already in shade
@@ -131,14 +131,37 @@ public partial class TimeOfDay : Node
         // Air: distance fog takes the sky's horizon colour; mist pools in valleys at dawn; light shafts in the trees.
         var fog = k.Fog.Lerp(grey * 1.05f, rain * .9f).Lerp(new Color(.85f, .88f, 1f), flash * .8f);
         Environment.FogLightColor = fog;
+        weather?.SetRainLight(fog.Lerp(new Color(.9f, .92f, 1f), flash), Math.Clamp(bright + flash, 0, 1));
         Environment.FogDensity = k.FogDensity * (1 + 2.2f * rain);
         Environment.FogHeightDensity = .0015f + .004f * k.Mist;
         Environment.VolumetricFogEnabled = DeadRecon.UI.Settings.LightShafts;
-        Environment.VolumetricFogDensity = k.Shafts * (1 + .2f * rain);
-        Sun.LightVolumetricFogEnergy = 2.2f * (1 - .85f * rain);           // no sunbeams through a storm (else: red murk at dusk)
+        Environment.VolumetricFogDensity = k.Shafts * 1.15f * (1 + .2f * rain);   // thicker fog darkens everything: the god rays (post) do the beams
+        Sun.LightVolumetricFogEnergy = 3.4f * (1 - .85f * rain);           // no sunbeams through a storm (else: red murk at dusk)
         Environment.VolumetricFogAlbedo = fog.Lerp(Colors.White, .65f).Lerp(new Color(.6f, .64f, .68f), rain * .7f);   // mostly neutral: the light colours it, not the air
         Environment.AmbientLightEnergy = k.Ambient * (1 - .12f * rain) + flash * 3;
-        Environment.TonemapExposure = k.Exposure * (1 + .12f * rain);   // eyes adapt to the gloom a little
+        Environment.TonemapExposure = k.Exposure * (1 + .12f * rain);
+        Grade(k, elev, rain);   // eyes adapt to the gloom a little
+    }
+
+    /// <summary>The grading pass (post.gdshader): haze glow and god rays from the sun, split toning by time and weather.</summary>
+    private void Grade(Key k, float elev, float rain)
+    {
+        if (Atmosphere.Current?.Post is not { } post) return;
+        float dark = Darkness, low = 1 - Mathf.SmoothStep(8, 35, elev), up = Mathf.SmoothStep(-2, 4, elev);
+        float wet = Math.Clamp(rain * 1.3f, 0, 1);
+        post.SetShaderParameter("sun_dir", Sun.GlobalTransform.Basis.Z);
+        post.SetShaderParameter("sun_color", k.SunColor * Math.Clamp(k.SunEnergy, 0, 1.4f));
+        post.SetShaderParameter("haze", (.1f + .2f * low) * up * (1 - wet));
+        post.SetShaderParameter("rays", (.12f + .16f * low) * up * (1 - wet) * (DeadRecon.UI.Settings.LightShafts ? 1 : 0));
+        // Day: cool shadows, warm light. Golden hour: warmer. Night: blue and muted. Rain: grey and flat.
+        var shadow = new Vector3(.94f, 1f, 1.07f).Lerp(new Vector3(.88f, .96f, 1.16f), dark);
+        var high = new Vector3(1.04f, 1f, .93f).Lerp(new Vector3(1.1f, .99f, .82f), low * up).Lerp(new Vector3(.97f, 1f, 1.06f), dark);
+        post.SetShaderParameter("shadow_tint", shadow.Lerp(new Vector3(.98f, 1f, 1.02f), wet));
+        post.SetShaderParameter("highlight_tint", high.Lerp(new Vector3(1f, 1f, 1f), wet));
+        post.SetShaderParameter("saturation", Mathf.Lerp(1.12f, .82f, dark) * Mathf.Lerp(1, .86f, wet));
+        post.SetShaderParameter("contrast", Mathf.Lerp(1.07f, 1.02f, wet));
+        post.SetShaderParameter("vignette", .18f + .1f * dark);
+        post.SetShaderParameter("lift", .012f * (1 - dark * .7f));
     }
 
     private Vector2 _cloudShift = new(13.7f, 4.2f);

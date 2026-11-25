@@ -36,6 +36,7 @@ public partial class Main : Node3D
 	private static float? _lastHour;
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
+	private Rocks? _rocks;
 	private DeadRecon.Gear.Kit _kit = null!;
 	private DeadRecon.UI.KitScreen _kitScreen = null!;
 	private DeadRecon.AI.Patrols? _patrols;
@@ -103,6 +104,7 @@ public partial class Main : Node3D
 		}
 		_carryOn = false;
 		DeadRecon.Gear.Kit.ClearLoot();
+		Ladders.Clear();
 		_spawn = spawn;
 		_walker.GlobalPosition = spawn.position;
 		_walker.Look(spawn.yaw, -4);
@@ -150,6 +152,8 @@ public partial class Main : Node3D
 		_villages = new Villages { World = _world, Towns = _towns, Viewer = _walker };
 		AddChild(_villages);
 		AddChild(new DeadRecon.Base.HomeBase { Player = _walker, World = _world });
+		_rocks = new Rocks { World = _world, Viewer = _walker };
+		AddChild(_rocks);
 
 		// The camp's guards: a grumpy patroller and a grumpier sentry by the radio desk.
 		Guard AddGuard(Vector3 home, bool sentry)
@@ -230,6 +234,7 @@ public partial class Main : Node3D
 		};
 		AddChild(_time);
 		AddChild(new Fireflies { Camera = _walker.Camera, World = _world });
+		AddChild(new Atmosphere { Camera = _walker.Camera, World = _world });
 		AddChild(new DeadRecon.Audio.Ambience { Camera = _walker.Camera });
 		AddChild(new DeadRecon.Combat.Ballistics());
 		_walker.SurfaceAt = p =>
@@ -786,6 +791,38 @@ public partial class Main : Node3D
 		await Shot("3_home_night");
 		_time.Hour = 10;
 		for (int k = 0; k < 6; k++) { var (who, text) = DeadRecon.Base.Chatter.Next(home); DeadRecon.Base.Chatter.Add(who, text); GD.Print($"[base] radio: {who}: {text}"); }
+		// Climb the watchtower's ladder.
+		var ladder = DeadRecon.Base.HomeBase.Current is { } hbNode ? Ladders.Of(hbNode) : null;
+		if (ladder != null)
+		{
+			_walker.SetFlying(false);
+			_walker.GlobalPosition = ladder.Bottom + ladder.Out * 1.1f + Vector3.Up * .3f;
+			var face = -ladder.Out;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-face.X, -face.Z)), 10);
+			await Frames(20);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.W, Keycode = Godot.Key.W, Pressed = true });
+			bool climbed = false;
+			for (int f = 0; f < 360; f++) { await Frames(1); if (_walker.Climbing) climbed = true; if (f == 90) await Shot("5_on_the_ladder"); }
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.W, Keycode = Godot.Key.W, Pressed = false });
+			await Frames(30);
+			GD.Print($"[base] ladder: climbed {climbed}, feet {_walker.GlobalPosition.Y:0.0} (top {ladder.Top.Y:0.0}), still on it {_walker.Climbing}");
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(face.X, face.Z)), -20);
+			await Frames(10);
+			await Shot("6_from_the_tower");
+			// And back down: walk to the ladder edge (facing out), then S.
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-ladder.Out.X, -ladder.Out.Z)), -30);
+			await Frames(5);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.W, Keycode = Godot.Key.W, Pressed = true });
+			for (int f = 0; f < 60 && !_walker.Climbing; f++) await Frames(1);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.W, Keycode = Godot.Key.W, Pressed = false });
+			bool grabbed = _walker.Climbing;
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.S, Keycode = Godot.Key.S, Pressed = true });
+			for (int f = 0; f < 400 && _walker.Climbing; f++) await Frames(1);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.S, Keycode = Godot.Key.S, Pressed = false });
+			await Frames(30);
+			float groundHere = _world.HeightAt(_walker.GlobalPosition.X, _walker.GlobalPosition.Z);
+			GD.Print($"[base] ladder down: grabbed at the top {grabbed}, now {_walker.GlobalPosition.Y - groundHere:0.0} m above the ground, health {_walker.Health:0}");
+		}
 		var radio = DeadRecon.Base.RadioScreen.Current!;
 		for (int page = 0; page < 3; page++) { radio.Open(page); await Frames(5); await Shot($"4_radio_page{page + 1}"); }
 		radio.Close();
@@ -1380,10 +1417,39 @@ public partial class Main : Node3D
 			await Frames(30);
 			await Shot(name);
 		}
+		// God rays: in the forest, looking at the sun through the canopy.
+		foreach (var (hour, name) in new[] { (8.2f, "g1_rays_morning"), (16.6f, "g2_rays_afternoon") })
+		{
+			_time.Hour = hour;
+			await Frames(2);
+			var toSun = _time.Sun.GlobalTransform.Basis.Z;
+			_walker.GlobalPosition = start + forest + Vector3.Up * .2f;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-toSun.X, -toSun.Z)), Math.Min(Mathf.RadToDeg(MathF.Asin(toSun.Y)), 40));
+			await Frames(40);
+			await Shot(name);
+		}
+		// Rocks, by day.
+		if (_rocks is { } rocks)
+		{
+			_time.Hour = 10.5f;
+			for (int k = 0; k < 2; k++)
+				if (rocks.Nearest(start + new Vector3(k * 120, 0, 0), k == 0 ? 1.2f : .6f) is { } rk)
+				{
+					var side = new Vector3(1, 0, .6f).Normalized();
+					_walker.GlobalPosition = rk.At + side * (rk.Size * 1.6f + 2.5f) + Vector3.Up * (1.4f + rk.Size * .3f);
+					var d = rk.At - _walker.Camera.GlobalPosition;
+					_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+					await Frames(40);
+					await Shot($"r{k + 1}_rock");
+				}
+			GD.Print($"[day] rocks near: {rocks.Count}");
+		}
 		_time.Hour = 18.6f; _weather.SetNow(Weather.Kind.Rain);
 		_walker.GlobalPosition = start + Vector3.Up * 3; _walker.Look(yaw, -6);
 		await Frames(40);
 		await Shot("8_rainy_dusk");
+		_time.Hour = 23.5f; await Frames(40); await Shot("8b_rainy_night");
+		_walker.Look(yaw, 50); await Frames(10); await Shot("8c_rainy_night_up");
 		_time.Hour = 14;
 		_walker.GlobalPosition = start + Vector3.Up * 40; _walker.Look(yaw, 22);
 		await Frames(60);

@@ -115,6 +115,7 @@ public partial class HomeBase : Node3D
     {
         _built.QueueFree();
         _built = new Node3D();
+        Ladders.RemoveOwner(this);
         AddChild(_built);
         if (Saved is not { } s) { Visible = false; return; }
         Visible = true;
@@ -209,21 +210,18 @@ public partial class HomeBase : Node3D
                 var p = t + basis * new Vector3(x, 0, z);
                 Box(wood, new Vector3(sx, 1, sz), new Vector3(p.X, top + .5f, p.Z), s.Yaw);
             }
-            // A ladder up the open side: a ramp you can walk, rungs to look at.
-            var foot = t + basis * new Vector3(half + 2.2f, 0, 0);
-            foot.Y = World.HeightAt(foot.X, foot.Z);
-            var topEdge = t + basis * new Vector3(half, 0, 0) with { };
-            topEdge = new Vector3(topEdge.X, top + .06f, topEdge.Z);
-            var dir = topEdge - foot;
-            var ramp = new StaticBody3D();
-            ramp.AddChild(new CollisionShape3D { Shape = new BoxShape3D { Size = new Vector3(.8f, .08f, dir.Length()) } });
-            _built.AddChild(ramp);
-            ramp.GlobalTransform = new Transform3D(Basis.LookingAt(dir.Normalized(), Vector3.Up), (foot + topEdge) / 2);
-            for (int r = 1; r < 16; r++)
-            {
-                var p = foot.Lerp(topEdge, r / 16f);
-                Box(wood, new Vector3(.7f, .04f, .06f), p, s.Yaw + MathF.PI / 2, solid: false);
-            }
+            // A ladder up the open side (climbable).
+            Ladders.Add(new Vector3((t + basis * new Vector3(half + .3f, 0, 0)).X, World.HeightAt((t + basis * new Vector3(half + .3f, 0, 0)).X, (t + basis * new Vector3(half + .3f, 0, 0)).Z), (t + basis * new Vector3(half + .3f, 0, 0)).Z),
+                        new Vector3((t + basis * new Vector3(half + .3f, 0, 0)).X, top + .06f, (t + basis * new Vector3(half + .3f, 0, 0)).Z), basis * Vector3.Right, this);
+            // The climbable ladder itself: solid, so you can't walk through it.
+            var lb = t + basis * new Vector3(half + .25f, 0, 0);
+            var ladderBody = new StaticBody3D();
+            ladderBody.AddChild(new CollisionShape3D { Shape = new BoxShape3D { Size = new Vector3(.08f, top - World.HeightAt(lb.X, lb.Z), .6f) } });
+            _built.AddChild(ladderBody);
+            ladderBody.GlobalPosition = new Vector3(lb.X, (top + World.HeightAt(lb.X, lb.Z)) / 2, lb.Z);
+            ladderBody.Rotation = new Vector3(0, s.Yaw, 0);
+            for (int r = 0; r < 14; r++)
+                Box(wood, new Vector3(.06f, .04f, .55f), new Vector3(lb.X, World.HeightAt(lb.X, lb.Z) + .3f + r * (top - World.HeightAt(lb.X, lb.Z)) / 14f, lb.Z), s.Yaw, solid: false);
         }
     }
 

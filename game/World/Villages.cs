@@ -43,6 +43,7 @@ public partial class Villages : Node3D
         public readonly List<House> Houses = new();
     }
     private SiteLayout _layout = new();
+    private object? _ladderOwner;
     public SiteLayout? LayoutOf(int site) => _built.TryGetValue(site, out var b) ? b.Layout : null;
     private double _since = 1;
     private Settlements.Site? _inside;
@@ -146,6 +147,7 @@ public partial class Villages : Node3D
                 if (d > FreeDistance)
                 {
                     foreach (int owner in b.Plants) Foliage.Remove(owner);
+                    Ladders.RemoveOwner(b);
                     b.Root.QueueFree();
                     _built.Remove(s.Index);
                 }
@@ -194,6 +196,7 @@ public partial class Villages : Node3D
     private Built Build(Settlements.Site site)
     {
         var b = new Built { Root = new Node3D { Name = $"Site_{site.Index}" } };
+        _ladderOwner = b;
         _layout = b.Layout;
         var kit = new Kit();
         var rng = new RandomNumberGenerator { Seed = (ulong)site.Index * 7919 + 12345 };
@@ -739,14 +742,17 @@ public partial class Villages : Node3D
         k.Box(_wood, new Vector3(s * 2 + .3f, .12f, s * 2 + .3f), L(new Vector3(0, -.06f, 0)));
         // Cross braces and a waist-high plank wall round the deck.
         foreach (float z in new[] { -s, s }) k.Box(_wood, new Vector3(.08f, .08f, MathF.Sqrt(deck * deck + 4 * s * s)), L(new Vector3(0, -deck / 2, z), new Basis(Vector3.Forward, MathF.Atan2(deck, 2 * s)) * new Basis(Vector3.Up, MathF.PI / 2)), solid: false);
-        foreach (var (x, z, sx, sz) in new[] { (0f, -s, s * 2, .06f), (0f, s, s * 2, .06f), (-s, 0f, .06f, s * 2), (s, 0f, .06f, s * 2) })
+        foreach (var (x, z, sx, sz) in new[] { (0f, -s, s * 2, .06f), (-s * .62f, s, s * .76f, .06f), (s * .62f, s, s * .76f, .06f), (-s, 0f, .06f, s * 2), (s, 0f, .06f, s * 2) })
             k.Box(_wood, new Vector3(sx, 1.0f, sz), L(new Vector3(x, .5f, z)));
         var roof = new PrismMesh { Size = new Vector3(s * 2 + 1, .7f, s * 2 + 1) };
         k.Add(_tin, roof, L(new Vector3(0, 2.75f, 0)));
-        // Ladder (looks only).
+        // Ladder: climbable (Ladders), on the tower's +Z side.
+        Ladders.Add(H * new Vector3(0, -deck, s + .25f) with { Y = World.HeightAt((H * new Vector3(0, 0, s + .25f)).X, (H * new Vector3(0, 0, s + .25f)).Z) },
+                    H * new Vector3(0, .05f, s + .25f), basis * Vector3.Back, _ladderOwner!);
         for (int i = 0; i < 14; i++)
             k.Box(_wood, new Vector3(.5f, .04f, .04f), L(new Vector3(0, -deck + .35f * i + .3f, s + .25f)), solid: false);
         foreach (float x in new[] { -.25f, .25f }) k.Box(_wood, new Vector3(.05f, deck + .4f, .05f), L(new Vector3(x, -deck / 2 + .2f, s + .25f)), solid: false);
+        k.Shape(new BoxShape3D { Size = new Vector3(.6f, deck, .08f) }, L(new Vector3(0, -deck / 2, s + .22f)));   // the ladder is solid: no walking through it
     }
 
     // ================================================================= little textures (made here, no assets)
