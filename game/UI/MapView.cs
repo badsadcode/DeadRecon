@@ -142,6 +142,21 @@ public partial class MapView : Control
             else { DrawLine(p - new Vector2(9, 9), p + new Vector2(9, 9), col, 3.5f); DrawLine(p + new Vector2(-9, 9), p + new Vector2(9, -9), col, 3.5f); }
             UiStyle.Text(this, p + new Vector2(14, 5), lz ? "LANDING ZONE" : "OBJECTIVE", 13, col, bold: true);
         }
+        // Village jobs: a green circle (a search area) or a ring on the spot, with a label.
+        if (DeadRecon.People.JobBoard.Current is { } board)
+            foreach (var job in board.Active)
+            {
+                if (job.Marker is not { } jm) continue;
+                var p = ToScreen(jm.X, jm.Z);
+                var green = new Color(.2f, .55f, .2f);
+                if (job.MarkerRadius > 0)
+                {
+                    DrawCircle(p, job.MarkerRadius / _mpp, new Color(green, .16f));
+                    DrawArc(p, job.MarkerRadius / _mpp, 0, MathF.Tau, 48, green, 2);
+                }
+                else DrawArc(p, 9, 0, MathF.Tau, 24, green, 3);
+                UiStyle.Text(this, p + new Vector2(job.MarkerRadius / _mpp + 8, -6), job.Title, 12, green, bold: board.Tracked == job);
+            }
         // Your waypoint.
         if (MapMemory.Current?.Waypoint is { } wp)
         {

@@ -64,7 +64,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -168,8 +168,9 @@ public partial class Main : Node3D
 			},
 		};
 		AddChild(_life);
+		AddChild(new DeadRecon.People.JobBoard { Towns = _towns, Player = _walker, World = _world, Life = _life, SpawnGuard = _life.SpawnGuard });
 		// Checkpoint garrisons and road patrols. Off in scripted tests (they'd wander into them), except their own.
-		if (!testing || Arg("patroltest", "") != "")
+		if (!testing || Arg("patroltest", "") != "" || Arg("jobtest", "") != "")
 		{
 			_patrols = new DeadRecon.AI.Patrols
 			{
@@ -260,6 +261,8 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string jobTest = Arg("jobtest", "");
+		if (jobTest != "") _ = RunJobTest(jobTest);
 		string patrolTest = Arg("patroltest", "");
 		if (patrolTest != "") _ = RunPatrolTest(patrolTest);
 		string kitTest = Arg("kittest", "");
@@ -671,6 +674,106 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	/// <summary>Village jobs: take each kind from the nearest village's headman and finish it (checkpoint, patrol,
+	/// missing farmer walked home, rice delivered), with photos of the HUD line, the map and the lost farmer.</summary>
+	private async Task RunJobTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[jobtest] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		void Key(Godot.Key k, bool down) => Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = k, Keycode = k, Pressed = down });
+		async Task PressF() { Key(Godot.Key.F, true); await Frames(3); Key(Godot.Key.F, false); await Frames(3); }
+		void Kill(System.Collections.Generic.IEnumerable<Guard> men) { foreach (var g in men.ToList()) if (IsInstanceValid(g)) g.TakeHit(1000, g.GlobalPosition + Vector3.Up, g.GlobalPosition + new Vector3(10, 1, 0)); }
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		var board = DeadRecon.People.JobBoard.Current!;
+		var start = _walker.GlobalPosition;
+		var village = _towns.Sites.Where(s => s.Kind == "village").OrderBy(s => s.Centre.DistanceTo(start)).First();
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = village.Centre + new Vector3(-8, 2, 6);
+		for (int f = 0; f < 2400 && (_life.Population == 0 || !_terrain.HasCollisionAt(village.Centre)); f++) await Frames(1);
+		await Seconds(1);
+		string Support() => $"{DeadRecon.People.Support.Get(village.Index):0} ({DeadRecon.People.Support.LevelAt(village.Index)})";
+		GD.Print($"[jobtest] {village.Name}, support {Support()}");
+		for (int round = 0; round < 4; round++)
+		{
+			string reply = _life.TestTalk(village.Index, 2);
+			var job = board.Tracked;
+			if (job == null || !job.Active) { GD.Print($"[jobtest] no job: {reply}"); break; }
+			GD.Print($"[jobtest] job {round + 1}: {job.Kind}: {job.Title}");
+			await Frames(2);
+			switch (job.Kind)
+			{
+				case DeadRecon.People.JobBoard.Kind.Checkpoint:
+				{
+					var cp = job.Place;
+					Kill(_patrols!.GarrisonOf(cp!.Index));
+					break;
+				}
+				case DeadRecon.People.JobBoard.Kind.Patrol:
+					Kill(_patrols!.TestMuster(board.PatrolOf(village.Index)!));
+					break;
+				case DeadRecon.People.JobBoard.Kind.Missing:
+				{
+					_walker.GlobalPosition = village.Centre + new Vector3(0, 30, 0);
+					_kitScreen.Open(2);
+					for (int f = 0; f < 900 && DeadRecon.UI.MapPainter.Get(_world, _towns) == null; f++) await Frames(1);
+					await Frames(5);
+					await Shot("2_map_missing");
+					_kitScreen.Close();
+					Input.MouseMode = Input.MouseModeEnum.Captured;
+					var lost = board.LostOf(village.Index)!;
+					_walker.SetFlying(false);
+					_walker.GlobalPosition = lost.GlobalPosition + new Vector3(2, 1, 1.5f);
+					for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.HasCollisionAt(lost.GlobalPosition)); f++) await Frames(1);
+					await Seconds(4);
+					LookAt(lost.GlobalPosition + Vector3.Up);
+					await Shot("3_lost_farmer");
+					await PressF();
+					GD.Print($"[jobtest] found him: following {lost.Following}");
+					// Walk home (well, teleport near home; he catches up).
+					_walker.GlobalPosition = village.Centre + new Vector3(4, 1, 4);
+					await Seconds(3);
+					break;
+				}
+				case DeadRecon.People.JobBoard.Kind.Delivery:
+				{
+					var to = job.Place;
+					GD.Print($"[jobtest] rice in the backpack: {_kit.AllItems.Any(i => i.Def == DeadRecon.Gear.ItemDef.RiceSacks)}, {_kit.Kg:0} kg");
+					_walker.SetFlying(false);
+					_walker.GlobalPosition = to!.Centre + new Vector3(2, 1, 2);
+					for (int f = 0; f < 900 && !_terrain.HasCollisionAt(to.Centre); f++) await Frames(1);
+					await Seconds(1);
+					await Shot("4_delivery_prompt");
+					await PressF();
+					break;
+				}
+			}
+			await Seconds(2);
+			GD.Print($"[jobtest] -> done {!job.Active && job.Done}, support {Support()}");
+			if (round == 0) { _walker.GlobalPosition = village.Centre + new Vector3(-8, 2, 6); await Seconds(1); await Shot("1_hud_after_first"); }
+			_walker.SetFlying(true);
+			_walker.GlobalPosition = village.Centre + new Vector3(-8, 2, 6);
+			await Seconds(1);
+		}
+		foreach (var j in board.All) GD.Print($"[jobtest] {j.Kind}: {(j.Done ? "done" : "open")} - {j.Title}");
+		GetTree().Quit();
+	}
+
 	/// <summary>Patrols: a checkpoint's garrison appears as you come near and can be cleared; a road patrol becomes
 	/// real near you, walks its road, and goes back to being a dot when you leave.</summary>
 	private async Task RunPatrolTest(string dir)

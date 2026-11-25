@@ -51,6 +51,7 @@ public partial class Hud : Control
     private static readonly Color Dim = new(.93f, .91f, .84f, .45f);
     private static readonly Color Amber = new(1, .78f, .3f);
     private static readonly Color Danger = new(1, .25f, .2f);
+    private static readonly Color JobColour = new(.55f, .85f, .45f);
 
     public override void _Ready()
     {
@@ -129,6 +130,11 @@ public partial class Hud : Control
         DrawCompass(new Vector2(centre.X, 34), 560);
         // Objective line under the compass.
         Text(new Vector2(0, 122), Mission.Objective(), 18, Ink, HorizontalAlignment.Center, size.X);
+        if (DeadRecon.People.JobBoard.Current?.Tracked is { Active: true } job)
+        {
+            string where = job.Marker is { } jm ? $"   {new Vector2(jm.X - Player.GlobalPosition.X, jm.Z - Player.GlobalPosition.Z).Length():0} m" : "";
+            Text(new Vector2(0, 146), $"JOB: {job.Title}{where}", 15, JobColour, HorizontalAlignment.Center, size.X);
+        }
 
         // Health, stance, dressings (bottom left): a segmented bar, a quiet line of status under it.
         var hp = new Vector2(30, size.Y - 52);
@@ -235,6 +241,13 @@ public partial class Hud : Control
             var p = at + new Vector2(dx, 26);
             DrawColoredPolygon(new[] { p + new Vector2(0, -7), p + new Vector2(6, 0), p + new Vector2(0, 7), p + new Vector2(-6, 0) }, Ink);
             Text(p + new Vector2(-40, 44), $"{new Vector2(to.X, to.Z).Length():0} m", 13, Ink, HorizontalAlignment.Center, 80);   // a row below the objective's
+        }
+        if (DeadRecon.People.JobBoard.Current?.Tracked is { Active: true, Marker: { } jobAt })
+        {
+            float dx = Math.Clamp(Wrap(Bearing(jobAt - Player.GlobalPosition) - h) * pxPerDeg, -width / 2, width / 2);
+            var p = at + new Vector2(dx, 26);
+            DrawCircle(p, 6, JobColour);
+            DrawArc(p, 6, 0, MathF.Tau, 16, new Color(0, 0, 0, .5f), 1.5f);
         }
         if (Mission.Target is { } target)
         {

@@ -64,6 +64,15 @@ public static class UiStyle
                 c.DrawLine(pts[1], pts[3], new Color(.8f, .72f, .5f), 2);
                 break;
             }
+            case "rice_sacks":
+            {
+                var sack = new[] { mid + new Vector2(-s * .3f, s * .36f), mid + new Vector2(s * .3f, s * .36f), mid + new Vector2(s * .26f, -s * .16f),
+                                   mid + new Vector2(s * .1f, -s * .3f), mid + new Vector2(-s * .1f, -s * .3f), mid + new Vector2(-s * .26f, -s * .16f) };
+                c.DrawColoredPolygon(sack, new Color(.72f, .62f, .42f));
+                c.DrawLine(mid + new Vector2(-s * .14f, -s * .22f), mid + new Vector2(s * .14f, -s * .22f), new Color(.4f, .3f, .18f), 3);
+                c.DrawString(Bold, mid + new Vector2(-s * .3f, s * .14f), "RICE", HorizontalAlignment.Center, s * .6f, (int)(s * .16f), new Color(.4f, .25f, .12f));
+                break;
+            }
             case "intel":
             {
                 var folder = new Rect2(mid - new Vector2(s * .38f, s * .28f), new Vector2(s * .76f, s * .56f));

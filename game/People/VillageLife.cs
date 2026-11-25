@@ -99,7 +99,7 @@ public partial class VillageLife : Node
             else if (d < SpawnDistance && Villages.LayoutOf(site.Index) is { } layout && _faces.Count > 0) Populate(site, layout);
         }
         SoldiersDealtWith();
-        Jobs();
+        if (JobBoard.Current == null) Jobs();
     }
 
     // ================================================================= who lives here
@@ -293,7 +293,8 @@ public partial class VillageLife : Node
             if (level >= Support.Level.Friendly) parts.Add("One of them never leaves the radio. Sits there all day like a hen on an egg.");
         }
         var cp = NearestCheckpoint(site);
-        if (cp != null) parts.Add($"{cp.Name} is {Compass(cp.Centre - site.Centre)}, on the road. {(_jobs.TryGetValue(site.Index, out var j) && j.Done ? "Quiet now, thanks to you." : "Avoid it if you can.")}");
+        bool quiet = JobBoard.Current?.CheckpointDone(site.Index) == true || (_jobs.TryGetValue(site.Index, out var j) && j.Done);
+        if (cp != null) parts.Add($"{cp.Name} is {Compass(cp.Centre - site.Centre)}, on the road. {(quiet ? "Quiet now, thanks to you." : "Avoid it if you can.")}");
         if (parts.Count == 0) parts.Add("Nothing new. The rice grows, the rain falls, my back hurts.");
         return string.Join(" ", parts);
     }
@@ -321,7 +322,32 @@ public partial class VillageLife : Node
         return "Eat. Drink. Bandage. In that order. ...There. Good as new. Nearly.";
     }
 
-    private string Work(Settlements.Site site, Support.Level level)
+    private string Work(Settlements.Site site, Support.Level level) => JobBoard.Current?.Talk(site, level) ?? OldWork(site, level);
+
+    /// <summary>A villager alone in the jungle (the "missing" job).</summary>
+    public Villager? SpawnLost(Settlements.Site site, Vector3 at, string name)
+    {
+        var layout = Villages.LayoutOf(site.Index);
+        if (layout == null || _faces.Count == 0) return null;
+        var v = new Villager
+        {
+            Job = Villager.Role.Homebody, Site = site.Index, Layout = layout, Player = Player, World = World, Seed = site.Index * 1000 + 900 + _faces.Count,
+            Home = layout.Houses.Count > 0 ? layout.Houses[0] : null, Seat = layout.Fire, Lost = true,
+            CharacterScene = _faces[Math.Abs(name.GetHashCode()) % _faces.Count], Name = $"Lost_{name.Replace(' ', '_')}",
+        };
+        AddChild(v);
+        v.GlobalPosition = at + Vector3.Up * .3f;
+        return v;
+    }
+
+    /// <summary>A found villager joins his village's people.</summary>
+    public void Adopt(Villager v, Settlements.Site site)
+    {
+        if (Villages.LayoutOf(site.Index) is { } layout) v.Settle(layout);
+        if (_folk.TryGetValue(site.Index, out var folk)) folk.People.Add(v);
+    }
+
+    private string OldWork(Settlements.Site site, Support.Level level)
     {
         if (level == Support.Level.Hostile) return "Do something for US? After what you did? Ha.";
         if (_jobs.TryGetValue(site.Index, out var job))

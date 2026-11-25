@@ -203,6 +203,44 @@ public partial class Patrols : Node
         }
     }
 
+    /// <summary>A patrol whose road passes within <paramref name="within"/> m of a place (a new one if none does).</summary>
+    public object? PatrolNear(Vector3 at, float within)
+    {
+        bool Passes(List<Vector3> route) => route.Any(q => Flat(q - at) < within);
+        var found = _patrols.FirstOrDefault(p => Passes(p.Route) && !p.Real);
+        if (found != null) return found;
+        var road = Towns.Roads.Where(r => r.Points.Length > 25 && r.Points.Any(q => Flat(q - at) < within)).OrderBy(_ => _rng.Randi()).FirstOrDefault();
+        if (road == null) return null;
+        var route = new List<Vector3>();
+        for (int k = 0; k < road.Points.Length; k += 4) route.Add(road.Points[k]);
+        if (route[^1] != road.Points[^1]) route.Add(road.Points[^1]);
+        // Start it at the far end of its road from the village, walking toward it.
+        bool startEnd = Flat(route[0] - at) < Flat(route[^1] - at);
+        var p2 = new Patrol { Route = route, At = startEnd ? route.Count - 1 : 0, Back = startEnd, Size = _rng.RandiRange(2, 3) };
+        _patrols.Add(p2);
+        return p2;
+    }
+
+    /// <summary>Where a patrol is now (its leader, or its dot on the road).</summary>
+    public Vector3? Where(object patrol)
+    {
+        if (patrol is not Patrol p || !_patrols.Contains(p)) return null;
+        var lead = p.Guards.FirstOrDefault(x => IsInstanceValid(x) && x.State != Guard.Mood.Dead);
+        return lead?.GlobalPosition ?? Pos(p);
+    }
+
+    /// <summary>Every man of that patrol is down (or it's been cleaned up already).</summary>
+    public bool IsGone(object patrol) =>
+        patrol is not Patrol p || !_patrols.Contains(p) || (p.Real && p.Guards.All(x => !IsInstanceValid(x) || x.State == Guard.Mood.Dead));
+
+    /// <summary>Tests: the men of a patrol, mustered now wherever it is.</summary>
+    public IReadOnlyList<Guard> TestMuster(object patrol)
+    {
+        if (patrol is not Patrol p) return Array.Empty<Guard>();
+        if (!p.Real) Muster(p);
+        return p.Guards;
+    }
+
     /// <summary>The checkpoint's garrison, manned now if it hasn't been met yet (the headman's job).</summary>
     public IReadOnlyList<Guard> GarrisonOf(int site)
     {

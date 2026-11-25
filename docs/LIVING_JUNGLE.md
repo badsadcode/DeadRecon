@@ -91,7 +91,7 @@ night. Darkness is a stealth tool like rain.
 
 ## Build order (proposal)
 
-1. **Atmosphere: day/night, light and mist.** Quick, transforms the mood. *(done; clouds still to come)*
+1. **Atmosphere: day/night, light and mist.** Quick, transforms the mood. *(done, clouds included)*
 2. **Roads and settlement sites in the world bake.** Fills the empty `Sites`/`Roads` slots in the generator: trails,
    dirt roads, bridges and fords, hamlet/village/town sites, outpost sites. *(done: `tools/WorldBaker/Settler.cs`;
    also rice paddies and wheat fields round every settlement. Bridges are marked but not built yet.)*
@@ -100,7 +100,8 @@ night. Darkness is a stealth tool like rain.
    huts, wells, stalls and checkpoints in `game/World/Villages.cs` until NoorArchitect exports exist)*
 4. **One village, alive.** Villagers with daily routines, a headman, support value, one or two local jobs.
    *(done: `game/People/`. Daily schedule, rain shelter, gunfire panic, chats; support saved in user://villages.json;
-   headman news, healing, a bed for Loyal villages, and the checkpoint job. More jobs to come.)*
+   headman news, healing, a bed for Loyal villages. Jobs (`game/People/Jobs.cs`): clear the checkpoint, stop the
+   patrol, find a missing farmer and walk him home, carry rice to a neighbour.)*
 5. **Roaming patrols** between sites, simulated cheaply off-screen, real near you.
    *(done: `game/AI/Patrols.cs`. Checkpoint garrisons that remember losses, road patrols that walk end to end,
    replacements after a wipe-out. Convoys wait for vehicles.)*

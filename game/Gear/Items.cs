@@ -2,7 +2,7 @@ using System.Collections.Generic;
 
 namespace DeadRecon.Gear;
 
-public enum ItemKind { Magazine, Medical, Attachment, Intel }
+public enum ItemKind { Magazine, Medical, Attachment, Intel, Cargo }
 
 /// <summary>Which rail or socket an attachment goes on.</summary>
 public enum Slot { None, Optic, Muzzle, Side, Underbarrel }
@@ -36,6 +36,7 @@ public sealed record ItemDef(
     public static readonly ItemDef Laser = Add(new("side_laser", "Laser pointer", "A red line from you to them (L). Steadier shots from the hip.", ItemKind.Attachment, 1, 1, .1f, Slot: Slot.Side, Model: "BadGun_side_laser_vietnam_97232"));
     public static readonly ItemDef Foregrip = Add(new("grip_vgrip", "Vertical foregrip", "Something to hold on to. Less recoil, steadier aim.", ItemKind.Attachment, 1, 1, .15f, Slot: Slot.Underbarrel, Model: "BadGun_underbarrel_vgrip_vietnam_97232"));
 
+    public static readonly ItemDef RiceSacks = Add(new("rice_sacks", "Sack of rice", "Twenty kilos of somebody's harvest, for somebody else's dinner. Heavy, lumpy, important.", ItemKind.Cargo, 2, 2, 20f));
     public static readonly ItemDef Intel = Add(new("intel", "Intel", "What you came for. Don't lose it, don't read it, don't spill rice on it.", ItemKind.Intel, 2, 2, .4f));
 }
 

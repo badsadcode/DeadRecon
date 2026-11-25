@@ -34,6 +34,11 @@ public partial class Villager : CharacterBody3D, IDamageable
     public Walker Player = null!;
     public BakedWorld World = null!;
     public int Seed;
+    /// <summary>Lost in the jungle (a job): sits tight and calls out until you find him (F), then follows you.</summary>
+    public bool Lost;
+    public bool Following { get; private set; }
+    private float _shout = 3;
+    private bool _fWas;
 
     public Doing State { get; private set; } = Doing.Standing;
     public string Activity { get; private set; } = "";
@@ -113,7 +118,7 @@ public partial class Villager : CharacterBody3D, IDamageable
     /// populated, so it doesn't start with everyone walking out of their front door).</summary>
     public void Plan(bool snap = false)
     {
-        if (State == Doing.Dead) return;
+        if (State == Doing.Dead || Lost) return;
         float hour = TimeOfDay.Current?.Hour ?? 12, rain = DeadRecon.World.Weather.Current?.Intensity ?? 0;
         // A little personal offset so the whole village doesn't move on the same minute.
         hour = (hour + (Seed % 7) * .07f) % 24;
@@ -258,6 +263,7 @@ public partial class Villager : CharacterBody3D, IDamageable
         if (_planIn <= 0) { _planIn = _rng.RandfRange(4, 7); Plan(); }
         UpdateBubble(dt);
         if (State == Doing.Indoors) return;
+        if (Lost) { BeLost(dt); return; }
 
         ReactToPlayer(dt);
         Vector3 target = GlobalPosition;
@@ -350,6 +356,59 @@ public partial class Villager : CharacterBody3D, IDamageable
         _steps.Stream = DeadRecon.Audio.Synth.Step(surface, (int)(_rng.Randi() % 6));
         _steps.PitchScale = 1 + .15f * _rng.Randf();
         _steps.Play();
+    }
+
+    /// <summary>Lost: crouched where he is, calling out when he hears someone. Found: following you, hurrying when
+    /// you get ahead.</summary>
+    private void BeLost(float dt)
+    {
+        float dist = Player.GlobalPosition.DistanceTo(GlobalPosition);
+        bool f = Input.IsPhysicalKeyPressed(Key.F), fPressed = f && !_fWas;
+        _fWas = f;
+        if (!Following)
+        {
+            _shout -= dt;
+            if (dist < 75 && _shout <= 0)
+            {
+                _shout = _rng.RandfRange(6, 10);
+                string[] calls = { "Hello?! Is someone there?!", "Over here! OVER HERE!", "Please don't be a tiger. Please don't be a tiger.", "Help! I'm by the big tree! ...They're all big trees!" };
+                Say(calls[_rng.RandiRange(0, calls.Length - 1)]);
+            }
+            if (dist < 3 && !Player.Dead)
+            {
+                DeadRecon.UI.Hud.Prompt("F   \"It's alright. Follow me.\"");
+                if (fPressed && Input.MouseMode == Input.MouseModeEnum.Captured)
+                {
+                    Following = true;
+                    Say("Oh, thank goodness! I thought I'd be eaten! Lead the way, I'm right behind you.");
+                }
+            }
+            _crouch = Mathf.MoveToward(_crouch, 1, dt * 3);
+            if (_body != null) { _body.Crouch = _crouch; _body.Speed = 0; }
+            Move(GlobalPosition, 0, dt);
+            _face = Player.GlobalPosition;
+            UpdateBubble(dt);
+            return;
+        }
+        // Following: a couple of metres behind you, running to catch up.
+        var target = Player.GlobalPosition;
+        float speed = dist > 12 ? 3.8f : dist > 3 ? 1.6f : 0;
+        _crouch = Mathf.MoveToward(_crouch, Player.Crouching ? .7f : 0, dt * 3);
+        Move(target, speed, dt);
+        if (_body != null) { _body.Crouch = _crouch; _body.Speed = new Vector2(Velocity.X, Velocity.Z).Length(); }
+        // Left far behind (a cliff, a river): he finds his own way to you.
+        if (dist > 60) GlobalPosition = Player.GlobalPosition - Player.GlobalTransform.Basis.Z * -3 + Vector3.Up;
+        _face = Player.GlobalPosition;
+        Steps(dt);
+    }
+
+    /// <summary>Home again: an ordinary villager from now on.</summary>
+    public void Settle(Villages.SiteLayout layout)
+    {
+        Lost = false; Following = false;
+        Layout = layout;
+        Say("Home! I'm never picking mushrooms again. ...Until Tuesday.");
+        Plan();
     }
 
     // ================================================================= people

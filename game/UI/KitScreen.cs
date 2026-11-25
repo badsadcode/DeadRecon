@@ -448,7 +448,7 @@ public partial class KitScreen : Control
         UiStyle.Text(this, tx, item.Name, 26, UiStyle.Ink, bold: true);
         string kind = item.Def.Kind switch
         {
-            ItemKind.Magazine => "MAGAZINE", ItemKind.Medical => "MEDICAL", ItemKind.Intel => "INTEL",
+            ItemKind.Magazine => "MAGAZINE", ItemKind.Medical => "MEDICAL", ItemKind.Intel => "INTEL", ItemKind.Cargo => "CARGO",
             _ => item.Def.Slot switch { Slot.Optic => "OPTIC", Slot.Muzzle => "MUZZLE DEVICE", Slot.Side => "SIDE RAIL", _ => "UNDERBARREL" },
         };
         UiStyle.Text(this, tx + new Vector2(0, 28), $"{kind}   ·   {item.Kg:0.00} kg   ·   {item.Def.W}x{item.Def.H}", 13, UiStyle.Amber);
