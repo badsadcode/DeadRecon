@@ -228,6 +228,14 @@ public partial class Hud : Control
         }
         DrawLine(at + new Vector2(0, -16), at + new Vector2(0, -8), Amber, 2);   // heading notch
 
+        if (MapMemory.Current?.Waypoint is { } wp)
+        {
+            var to = wp - Player.GlobalPosition;
+            float dx = Math.Clamp(Wrap(Bearing(to) - h) * pxPerDeg, -width / 2, width / 2);
+            var p = at + new Vector2(dx, 26);
+            DrawColoredPolygon(new[] { p + new Vector2(0, -7), p + new Vector2(6, 0), p + new Vector2(0, 7), p + new Vector2(-6, 0) }, Ink);
+            Text(p + new Vector2(-40, 44), $"{new Vector2(to.X, to.Z).Length():0} m", 13, Ink, HorizontalAlignment.Center, 80);   // a row below the objective's
+        }
         if (Mission.Target is { } target)
         {
             var to = target - Player.GlobalPosition;

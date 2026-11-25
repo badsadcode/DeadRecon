@@ -21,6 +21,10 @@ public partial class KitScreen : Control
 {
     public Kit Kit = null!;
     public Walker Player = null!;
+    public DeadRecon.World.BakedWorld? World;
+    public DeadRecon.World.Settlements? Towns;
+    public DeadRecon.Missions.Mission? Mission;
+    private MapView? _map;
 
     public static bool IsOpen { get; private set; }
 
@@ -75,6 +79,12 @@ public partial class KitScreen : Control
         _pivot = new Node3D();
         _preview.AddChild(_pivot);
 
+        if (World != null)
+        {
+            _map = new MapView { World = World, Towns = Towns, Player = Player, Mission = Mission, Visible = false };
+            AddChild(_map);
+        }
+
         Kit.Changed += QueueRedraw;
         Kit.LoadoutChanged += OnLoadout;
         if (IconBaker.Current != null) IconBaker.Current.Baked += _ => QueueRedraw();
@@ -107,6 +117,12 @@ public partial class KitScreen : Control
     public override void _Input(InputEvent e)
     {
         if (e is not InputEventKey { Pressed: true, Echo: false } k) return;
+        if (k.PhysicalKeycode == Key.M && _map != null)
+        {
+            if (IsOpen && _page == 2) Close(); else if (IsOpen) { _page = 2; _map.CentreOnPlayer(); QueueRedraw(); } else if (!GetTree().Paused && !Player.Dead) Open(2);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (k.PhysicalKeycode == Key.Tab || (IsOpen && k.PhysicalKeycode == Key.Escape))
         {
             if (IsOpen) Close(); else if (!GetTree().Paused && !Player.Dead) Open();
@@ -116,6 +132,7 @@ public partial class KitScreen : Control
         if (!IsOpen) return;
         if (k.PhysicalKeycode == Key.Key1) { _page = 0; QueueRedraw(); }
         if (k.PhysicalKeycode == Key.Key2) { _page = 1; QueueRedraw(); }
+        if (k.PhysicalKeycode == Key.Key3 && _map != null) { _page = 2; _map.CentreOnPlayer(); QueueRedraw(); }
         if (k.PhysicalKeycode == Key.R && _drag != null) { _dragRot = !_dragRot; QueueRedraw(); }
         GetViewport().SetInputAsHandled();
     }
@@ -128,6 +145,7 @@ public partial class KitScreen : Control
         GetTree().Paused = true;
         Input.MouseMode = Input.MouseModeEnum.Visible;
         _selected = null; _drag = null;
+        if (_page == 2) _map?.CentreOnPlayer();
         QueueRedraw();
     }
 
@@ -155,6 +173,12 @@ public partial class KitScreen : Control
         _offset = (view - new Vector2(RefW, RefH) * _scale) / 2;
         // The 3D preview sits in the left half of the rifle page.
         _previewBox.Visible = _page == 1;
+        if (_map != null)
+        {
+            _map.Visible = _page == 2;
+            _map.Position = ToScreen(new Vector2(60, 125));
+            _map.Size = new Vector2(1480, 680) * _scale;
+        }
         if (_page == 1)
         {
             var at = ToScreen(new Vector2(60, 130));
@@ -280,6 +304,7 @@ public partial class KitScreen : Control
         UiStyle.Text(this, new Vector2(70, 78), "KIT", 34, UiStyle.Ink, bold: true);
         Tab(new Rect2(170, 50, 170, 38), "1   BACKPACK", 0);
         Tab(new Rect2(350, 50, 150, 38), "2   RIFLE", 1);
+        if (_map != null) Tab(new Rect2(510, 50, 140, 38), "3   MAP", 2);
 
         var hp = new Rect2(1180, 60, 340, 10);
         DrawRect(hp, UiStyle.Faint);
@@ -289,12 +314,13 @@ public partial class KitScreen : Control
         UiStyle.Text(this, new Vector2(1180, 92), $"{Kit.Kg:0.0} KG CARRIED", 13, UiStyle.Dim, HorizontalAlignment.Right, 340);
         DrawLine(new Vector2(70, 108), new Vector2(1530, 108), UiStyle.Faint, 1);
 
-        if (_page == 0) DrawBackpack(); else DrawRifle();
+        if (_page == 0) DrawBackpack(); else if (_page == 1) DrawRifle();
 
         if (_messageAge < 3.5f)
             UiStyle.Text(this, new Vector2(0, 820), _message, 17, new Color(UiStyle.Amber, Math.Clamp(3.5f - _messageAge, 0, 1)), HorizontalAlignment.Center, RefW);
         UiStyle.Text(this, new Vector2(70, 868),
-            _page == 0 ? "Drag to move  ·  R turns while dragging  ·  Right-click: use or fit  ·  Tab: back to the jungle"
+            _page == 2 ? "Drag to pan  ·  Wheel zooms  ·  Click: set a waypoint (on your compass)  ·  Right-click: clear it  ·  M or Tab: back"
+            : _page == 0 ? "Drag to move  ·  R turns while dragging  ·  Right-click: use or fit  ·  Tab: back to the jungle"
                        : "Drag the rifle to turn it  ·  Wheel zooms  ·  Click a part to fit it  ·  L in the field: light / laser  ·  Tab: back",
             13, UiStyle.Dim);
         DrawSetTransform(Vector2.Zero, 0, Vector2.One);

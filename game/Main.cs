@@ -194,7 +194,10 @@ public partial class Main : Node3D
 		// Tab: the kit screen (backpack and gunsmith), above the HUD.
 		var kitLayer = new CanvasLayer { Layer = 5 };
 		AddChild(kitLayer);
-		_kitScreen = new DeadRecon.UI.KitScreen { Kit = _kit, Player = _walker };
+		DeadRecon.UI.MapMemory.Persist = !testing;
+		AddChild(new DeadRecon.UI.MapMemory { Player = _walker, World = _world });
+		DeadRecon.UI.MapPainter.Warm(_world, _towns);   // paints in the background; ready long before you press M
+		_kitScreen = new DeadRecon.UI.KitScreen { Kit = _kit, Player = _walker, World = _world, Towns = _towns, Mission = _mission };
 		kitLayer.AddChild(_kitScreen);
 		_menu = new DeadRecon.UI.PauseMenu { Walker = _walker };
 		_menu.Changed += () => _hud.Visible = DeadRecon.UI.Settings.ShowDebug;
@@ -274,7 +277,7 @@ public partial class Main : Node3D
 			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take/talk/search  Tab: kit  H: dressing  L: light  F4: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take/talk/search  Tab: kit  M: map  H: dressing  L: light  F4: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
@@ -707,6 +710,17 @@ public partial class Main : Node3D
 		k.LightOn = true;
 		await Frames(40);
 		await Shot("9_laser_night");
+		// The map: wait for the painting, set a waypoint, look.
+		_time.Hour = 10; k.LightOn = false;
+		var start = _walker.GlobalPosition;
+		DeadRecon.UI.MapMemory.Current!.Waypoint = start + new Vector3(350, 0, -250);
+		_kitScreen.Open(2);
+		for (int f = 0; f < 900 && DeadRecon.UI.MapPainter.Get(_world, _towns) == null; f++) await Frames(1);
+		await Frames(10);
+		await Shot("10_map");
+		_kitScreen.Close();
+		await Frames(20);
+		await Shot("11_compass_waypoint");
 		GetTree().Quit();
 	}
 
