@@ -89,6 +89,42 @@ public partial class Kit : Node
     {
         Current = this;
         if (!Load()) Standard();
+        Player.Died += DropPack;
+        // A pack you lost last time is still out there.
+        if (DeadRecon.Base.HomeBase.Saved?.Lost is { } lost)
+            AddLoot(new Vector3(lost.X, lost.Y, lost.Z), "Get your backpack back", kit => kit.Recover(), key: "lostpack");
+    }
+
+    /// <summary>Died out there (with a home to wake up in): the backpack stays where you fell. The vest, the gun and
+    /// what's on it come home with you. Building supplies in the pack are lost with it until you go back.</summary>
+    private void DropPack()
+    {
+        if (DeadRecon.Base.HomeBase.Saved is not { } home || Pack.Items.Count == 0) return;
+        if (Player.GlobalPosition.DistanceTo(new Vector3(home.X, Player.GlobalPosition.Y, home.Z)) < DeadRecon.Base.Structures.CampRadius()) return;
+        var items = Pack.Items.Where(i => i.Def != ItemDef.Intel).Select(i => new SavedItem(i.Def.Id, i.Count, i.Rounds, i.X, i.Y, i.Rotated)).ToList();
+        home.Lost = new DeadRecon.Base.HomeBase.LostPack { X = Player.GlobalPosition.X, Y = Player.GlobalPosition.Y + .3f, Z = Player.GlobalPosition.Z, Items = JsonSerializer.Serialize(items) };
+        Pack.Items.Clear();
+        DeadRecon.Base.HomeBase.SaveNow();
+        Save();
+        GD.Print($"[kit] pack dropped at {Player.GlobalPosition} ({items.Count} items)");
+    }
+
+    /// <summary>Picking your lost pack back up.</summary>
+    public string Recover()
+    {
+        if (DeadRecon.Base.HomeBase.Saved?.Lost is not { } lost) return "Nothing there.";
+        var items = JsonSerializer.Deserialize<List<SavedItem>>(lost.Items) ?? new();
+        int got = 0, left = 0;
+        foreach (var s in items)
+            if (ItemDef.All.TryGetValue(s.Id, out var def))
+            {
+                var item = new Item(def, s.Count) { Rounds = s.Rounds };
+                if (Pack.Place(item) || Vest.Place(item)) got++; else left++;
+            }
+        DeadRecon.Base.HomeBase.Saved.Lost = null;
+        DeadRecon.Base.HomeBase.SaveNow();
+        Changed?.Invoke(); Save();
+        return left > 0 ? $"Got your pack back ({left} things didn't fit and stayed in the mud)" : "Got your pack back. Everything's a bit damp.";
     }
 
     public override void _ExitTree() { if (Current == this) Current = null; }

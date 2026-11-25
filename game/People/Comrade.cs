@@ -318,7 +318,7 @@ public partial class Comrade : CharacterBody3D, IDamageable
             Dead = true;
             _tag.Visible = false;
             _body?.Ragdoll(GlobalPosition + Vector3.Up, Vector3.Down, .3f);
-            GetChild<CollisionShape3D>(0).Disabled = true;
+            GetChild<CollisionShape3D>(0).SetDeferred(CollisionShape3D.PropertyName.Disabled, true);
             DeadRecon.UI.Hud.Announce($"{Person} is gone", "the camp will remember");
             GD.Print($"[squad] {Person} died");
             Died?.Invoke(this);

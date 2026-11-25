@@ -588,6 +588,9 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (anyone) Bark("alarm");
     }
 
+    /// <summary>Reinforcements: run to the trouble.</summary>
+    public void Respond(Vector3 where) => HearAlarm(where);
+
     private void HearAlarm(Vector3 where)
     {
         if (State is Mood.Alert or Mood.Dead) return;
@@ -704,7 +707,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         _body?.Ragdoll(at, squashed ? Vector3.Down : shotDir, squashed ? 2 : 1);
         _deathTime = 0;
         _icon.Visible = false;
-        GetChild<CollisionShape3D>(0).Disabled = true;
+        GetChild<CollisionShape3D>(0).SetDeferred(CollisionShape3D.PropertyName.Disabled, true);
     }
 
     // ================================================================= shooting

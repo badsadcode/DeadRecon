@@ -247,7 +247,7 @@ public partial class Villager : CharacterBody3D, IDamageable
         GlobalPosition = at;
         State = Doing.Indoors;
         Visible = false;
-        GetChild<CollisionShape3D>(0).Disabled = true;
+        GetChild<CollisionShape3D>(0).SetDeferred(CollisionShape3D.PropertyName.Disabled, true);
         Velocity = Vector3.Zero;
     }
 
@@ -255,7 +255,7 @@ public partial class Villager : CharacterBody3D, IDamageable
     {
         GlobalPosition = at + Vector3.Up * .05f;
         Visible = true;
-        GetChild<CollisionShape3D>(0).Disabled = false;
+        GetChild<CollisionShape3D>(0).SetDeferred(CollisionShape3D.PropertyName.Disabled, false);
         if (State == Doing.Indoors) State = Doing.Standing;
     }
 
@@ -486,7 +486,7 @@ public partial class Villager : CharacterBody3D, IDamageable
             State = Doing.Dead;
             Activity = "dead";
             _body?.Ragdoll(at, squashed ? Vector3.Down : (at - from).Normalized(), squashed ? 2 : 1);
-            GetChild<CollisionShape3D>(0).Disabled = true;
+            GetChild<CollisionShape3D>(0).SetDeferred(CollisionShape3D.PropertyName.Disabled, true);
             _bubble.Visible = false;
             if (squashed) Support.Change(Site, -10, "a villager was killed by a falling tree");
             else { Support.Change(Site, -40, "you killed a villager"); Support.Spread(Site, -8); }

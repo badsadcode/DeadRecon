@@ -142,7 +142,7 @@ public partial class RadioScreen : Control
             int page = i;
             _buttons.Add((r, () => _page = page));
         }
-        int supplies = Kit.Current?.AllItems.Where(it => it.Def == ItemDef.Supplies).Sum(it => it.Count) ?? 0;
+        int supplies = Structures.Supplies();
         UiStyle.Text(this, new Vector2(930, 78), $"BUILDING SUPPLIES: {supplies}   ·   OPERATIONS DONE: {HomeBase.Saved?.Operations ?? 0}", 14, UiStyle.Dim, HorizontalAlignment.Right, 600);
         DrawLine(new Vector2(70, 108), new Vector2(1530, 108), UiStyle.Faint, 1);
         if (_page == 0) DrawOperations(); else if (_page == 1) DrawBuild(supplies); else if (_page == 2) DrawLog(); else DrawSoldiers();

@@ -157,12 +157,15 @@ public partial class Structures : Node3D
             if (mi.MaterialOverride is StandardMaterial3D m) m.AlbedoColor = new Color(c, .45f);
     }
 
-    private static int Supplies() => Kit.Current?.AllItems.Where(i => i.Def == ItemDef.Supplies).Sum(i => i.Count) ?? 0;
+    /// <summary>What you can build with: the camp stores plus what you're carrying.</summary>
+    public static int Supplies() => Stores + (Kit.Current?.AllItems.Where(i => i.Def == ItemDef.Supplies).Sum(i => i.Count) ?? 0);
 
     private static void Pay(int cost)
     {
-        if (Kit.Current is not { } kit) return;
-        int left = cost;
+        int fromStores = Math.Min(Stores, cost);
+        Stores -= fromStores;
+        int left = cost - fromStores;
+        if (left == 0 || Kit.Current is not { } kit) { HomeBase.SaveNow(); return; }
         foreach (var it in kit.AllItems.Where(x => x.Def == ItemDef.Supplies).ToList())
         {
             int take = Math.Min(left, it.Count);

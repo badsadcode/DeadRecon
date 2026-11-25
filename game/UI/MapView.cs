@@ -169,6 +169,13 @@ public partial class MapView : Control
             DrawPolyline(new[] { p + new Vector2(0, -10), p + new Vector2(9, -2), p + new Vector2(6, 8), p + new Vector2(-6, 8), p + new Vector2(-9, -2), p + new Vector2(0, -10) }, ink, 1.5f);
             UiStyle.Text(this, p + new Vector2(13, 5), "HOME", 13, green, bold: true);
         }
+        // Your lost backpack.
+        if (DeadRecon.Base.HomeBase.Saved?.Lost is { } lost)
+        {
+            var p = ToScreen(lost.X, lost.Z);
+            DrawRect(new Rect2(p - new Vector2(6, 7), new Vector2(12, 14)), new Color(.6f, .25f, .1f));
+            UiStyle.Text(this, p + new Vector2(10, 5), "YOUR PACK", 12, new Color(.6f, .25f, .1f), bold: true);
+        }
         // Your waypoint.
         if (MapMemory.Current?.Waypoint is { } wp)
         {

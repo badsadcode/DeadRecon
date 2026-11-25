@@ -53,11 +53,21 @@ public partial class HomeBase : Node3D
         public bool Alive { get; set; } = true;
     }
 
+    public sealed class LostPack
+    {
+        public float X { get; set; }
+        public float Z { get; set; }
+        public float Y { get; set; }
+        public string Items { get; set; } = "";
+    }
+
     public sealed class State
     {
         public List<Soldier> Soldiers { get; set; } = new();
         public List<Structures.Placed> Structures { get; set; } = new();
         public int Stores { get; set; }
+        /// <summary>Your backpack, where you died (items as saved by the kit), until you fetch it.</summary>
+        public LostPack? Lost { get; set; }
         /// <summary>Guns you've brought home (handed out to your soldiers at the radio).</summary>
         public List<string> Armory { get; set; } = new() { DeadRecon.Gear.WeaponDef.Default };
         public float X { get; set; }
@@ -290,6 +300,13 @@ public partial class HomeBase : Node3D
         float t = Time.GetTicksMsec() / 1000f;
         if (_fire != null) _fire.LightEnergy = (.6f + 1.4f * (TimeOfDay.Current?.Darkness ?? 0)) * (.85f + .1f * MathF.Sin(t * 13) + .05f * MathF.Sin(t * 31));
         if (_lamp != null) _lamp.LightEnergy = MathF.Sin(t * 2) > .6f ? .5f : .2f;
+        // Coming home: building supplies go into the camp stores (safe now).
+        if (Kit.Current is { } bag && Player.GlobalPosition.DistanceTo(Radio) < Structures.CampRadius() && !Player.Dead)
+        {
+            int unload = 0;
+            foreach (var it in bag.AllItems.Where(i => i.Def == ItemDef.Supplies).ToList()) { unload += it.Count; bag.Remove(it); }
+            if (unload > 0) { Saved.Stores += unload; Save(); Hud.Toast($"Unloaded {unload} building supplies into the camp stores ({Saved.Stores})"); }
+        }
         // The radio talks when you're near it.
         _chatterIn -= (float)delta;
         if (_chatterIn <= 0 && Player.GlobalPosition.DistanceTo(Radio) < 30)

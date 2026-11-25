@@ -70,7 +70,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -175,6 +175,14 @@ public partial class Main : Node3D
 		_guard = AddGuard(_mission.Camp + new Vector3(0, 0, -2), sentry: false);
 		var sentryGuard = AddGuard(_mission.Desk + new Vector3(-.8f, 0, 1.6f), sentry: true);
 		if (op == Mission.Op.Officer) _mission.Officer = sentryGuard;
+		if (op == Mission.Op.Prisoner) _mission.KeyHolder = sentryGuard;
+		// Bigger camps than before: a second patroller always, and a pair roving round the edge.
+		var g2 = AddGuard(_mission.Camp + new Vector3(4, 0, 5), sentry: false);
+		if (!testing || op == Mission.Op.Intel && Arg("squadbasetest", "") != "")
+		{
+			var r1 = AddGuard(_mission.Camp + new Vector3(-20, 0, 0), sentry: false); r1.PatrolMin = 32; r1.PatrolMax = 45;
+			var r2 = AddGuard(_mission.Camp + new Vector3(-22, 0, 3), sentry: false); r2.PatrolMin = 32; r2.PatrolMax = 45;
+		}
 		// Bigger camps on higher difficulty and some operations: extra patrollers walking wider loops.
 		var extra = new RandomNumberGenerator { Seed = (ulong)seed * 31 + 7 };
 		int extras = DeadRecon.UI.Settings.Difficulty switch
@@ -190,6 +198,15 @@ public partial class Main : Node3D
 			g.PatrolMin = 24; g.PatrolMax = 38;
 		}
 		}
+		_mission.SpawnGuard = (home, sentry) =>
+		{
+			home.Y = _world.HeightAt(home.X, home.Z) + .2f;
+			var g = new Guard { WeaponId = DeadRecon.Gear.WeaponDef.ForGuard(new RandomNumberGenerator { Seed = (ulong)(home.X * 31 + home.Z * 17) }).Id, Target = _walker, Terrain = _terrain, World = _world, Home = _mission.Camp, Sentry = false, PatrolMin = 10, PatrolMax = 25 };
+			AddChild(g);
+			g.GlobalPosition = home;
+			_guards.Add(g);
+			return g;
+		};
 		_mission.Trees = _trees;
 		AddChild(_mission);
 		// Village people. Guards they ask you to deal with (checkpoints) are spawned through here.
@@ -337,6 +354,7 @@ public partial class Main : Node3D
 		if (gunTest != "") _ = RunGunTest(gunTest);
 		string baseTest = Arg("basetest", "");
 		if (baseTest != "") _ = RunBaseTest(baseTest);
+		if (Arg("risktest", "") != "") _ = RunRiskTest();
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -857,6 +875,36 @@ public partial class Main : Node3D
 		for (int page = 0; page < 3; page++) { radio.Open(page); await Frames(5); await Shot($"4_radio_page{page + 1}"); }
 		radio.Close();
 		foreach (var (kind, opSeed) in DeadRecon.Base.RadioScreen.Offers()) GD.Print($"[base] offer: {Mission.NameFor(opSeed)}: {Mission.Describe(kind)}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Risk: send the intel (alarm), reinforcements arrive; die with supplies in the pack; it's left where you
+	/// fell; get it back. Prints what happened.</summary>
+	private async Task RunRiskTest()
+	{
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		_weather.AutoChange = false; _time.Frozen = true; _time.Hour = 10;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		var away = (_spawn.position - _mission.Camp) with { Y = 0 };
+		for (int k = 0; k < 24; k++)
+		{
+			var at = _mission.Camp + away.Normalized().Rotated(Vector3.Up, k * .5f) * (300 + k * 10);
+			at.Y = _world.HeightAt(at.X, at.Z);
+			if (DeadRecon.Base.HomeBase.Establish(at, 0, _world) == null) break;
+		}
+		_kit.Pack.Items.Clear();
+		_kit.Add(DeadRecon.Gear.ItemDef.Supplies, 6, quiet: true);
+		_kit.Pack.Place(new DeadRecon.Gear.Item(DeadRecon.Gear.ItemDef.Laser));
+		_mission.TestTakeIntel();
+		GD.Print($"[risk] {_mission.Objective()}; transmitted {_mission.Transmitted}");
+		await Seconds(38);
+		GD.Print($"[risk] reinforcements: {_mission.Reinforcements}, guards now {_mission.Guards.Count}");
+		var died = _walker.GlobalPosition;
+		_walker.TakeHit(1000, _walker.Chest, _walker.Chest + Vector3.Forward);
+		await Seconds(.5);
+		GD.Print($"[risk] died: pack now {_kit.Pack.Items.Count} items; lost pack saved {DeadRecon.Base.HomeBase.Saved?.Lost != null}, {DeadRecon.Base.HomeBase.Saved?.Lost?.Items.Length} chars");
+		GD.Print($"[risk] recover: {_kit.Recover()}; pack now {_kit.Pack.Items.Count} items, supplies {_kit.AllItems.Where(i => i.Def == DeadRecon.Gear.ItemDef.Supplies).Sum(i => i.Count)}");
 		GetTree().Quit();
 	}
 
