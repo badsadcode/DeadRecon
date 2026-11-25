@@ -102,7 +102,9 @@ night. Darkness is a stealth tool like rain.
    *(done: `game/People/`. Daily schedule, rain shelter, gunfire panic, chats; support saved in user://villages.json;
    headman news, healing, a bed for Loyal villages, and the checkpoint job. More jobs to come.)*
 5. **Roaming patrols** between sites, simulated cheaply off-screen, real near you.
-6. **The map and its memory.** A map screen with what you've discovered, site ownership, village support; persistence
+   *(done: `game/AI/Patrols.cs`. Checkpoint garrisons that remember losses, road patrols that walk end to end,
+   replacements after a wipe-out. Convoys wait for vehicles.)*
+6. **The map and its memory.** *(map done: M; discovered ground kept. Site ownership and full persistence to come.)* A map screen with what you've discovered, site ownership, village support; persistence
    between sessions.
 7. **Towns.** Market town first, then the provincial town.
 8. **Friendly camps and the region turning.**

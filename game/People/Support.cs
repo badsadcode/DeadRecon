@@ -63,7 +63,7 @@ public static class Support
         Values.Clear();
         try
         {
-            if (!FileAccess.FileExists(File)) return;
+            if (!Persist || !FileAccess.FileExists(File)) return;
             using var f = FileAccess.Open(File, FileAccess.ModeFlags.Read);
             using var doc = JsonDocument.Parse(f.GetAsText());
             if (!doc.RootElement.TryGetProperty(world, out var w)) return;

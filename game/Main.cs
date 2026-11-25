@@ -34,6 +34,7 @@ public partial class Main : Node3D
 	private Villages _villages = null!;
 	private DeadRecon.Gear.Kit _kit = null!;
 	private DeadRecon.UI.KitScreen _kitScreen = null!;
+	private DeadRecon.AI.Patrols? _patrols;
 	private DeadRecon.People.VillageLife _life = null!;
 	private DeadRecon.UI.PauseMenu _menu = null!;
 	private ColorRect _hurt = null!;
@@ -63,6 +64,8 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest"));
+		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
 
@@ -83,7 +86,6 @@ public partial class Main : Node3D
 		_spawn = spawn;
 		_walker.GlobalPosition = spawn.position;
 		_walker.Look(spawn.yaw, -4);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest"));
 		DeadRecon.Gear.Kit.Persist = !testing;
 		_kit = new DeadRecon.Gear.Kit { Player = _walker };
 		AddChild(_kit);
@@ -108,7 +110,6 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		DeadRecon.People.Support.Persist = !testing;
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -167,6 +168,26 @@ public partial class Main : Node3D
 			},
 		};
 		AddChild(_life);
+		// Checkpoint garrisons and road patrols. Off in scripted tests (they'd wander into them), except their own.
+		if (!testing || Arg("patroltest", "") != "")
+		{
+			_patrols = new DeadRecon.AI.Patrols
+			{
+				Towns = _towns, Player = _walker, World = _world,
+				Spawn = (home, sentry, setup) =>
+				{
+					home.Y = _world.HeightAt(home.X, home.Z) + .2f;
+					var g = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry };
+					setup?.Invoke(g);
+					AddChild(g);
+					g.GlobalPosition = home;
+					_guards.Add(g);
+					return g;
+				},
+				Despawn = g => { _guards.Remove(g); g.QueueFree(); },
+			};
+			AddChild(_patrols);
+		}
 
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
@@ -239,6 +260,8 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string patrolTest = Arg("patroltest", "");
+		if (patrolTest != "") _ = RunPatrolTest(patrolTest);
 		string kitTest = Arg("kittest", "");
 		if (kitTest != "") _ = RunKitTest(kitTest);
 		string lifeTest = Arg("lifetest", "");
@@ -648,6 +671,75 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	/// <summary>Patrols: a checkpoint's garrison appears as you come near and can be cleared; a road patrol becomes
+	/// real near you, walks its road, and goes back to being a dot when you leave.</summary>
+	private async Task RunPatrolTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[patrol] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		var p = _patrols!;
+		var start = _walker.GlobalPosition;
+		var cp = _towns.Sites.Where(s => s.Kind == "outpost").OrderBy(s => s.Centre.DistanceTo(start)).First();
+		int before = _guards.Count;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = cp.Centre + new Vector3(30, 18, 30);
+		await Seconds(2);
+		var garrison = p.GarrisonOf(cp.Index);
+		GD.Print($"[patrol] {cp.Name}: garrison {garrison.Count} ({_guards.Count - before} new guards in the world)");
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(cp.Centre)); f++) await Frames(1);
+		await Seconds(2);
+		LookAt(cp.Centre);
+		await Shot("1_checkpoint_manned");
+		foreach (var g in garrison.ToList()) g.TakeHit(1000, g.GlobalPosition + Vector3.Up, g.GlobalPosition + new Vector3(10, 1, 0));
+		await Seconds(1.5);
+		GD.Print($"[patrol] {cp.Name} cleared: {p.IsCleared(cp.Index)}");
+		// A road patrol.
+		var meet = p.TestBringPatrolNear(start + new Vector3(0, 0, 900));
+		if (meet is { } m)
+		{
+			_walker.GlobalPosition = m + new Vector3(60, 25, 60);
+			await Seconds(2);
+			GD.Print($"[patrol] real patrols near {m}: {p.RealPatrols}, men {p.PatrolGuards.Count()}");
+			for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+			var lead = p.PatrolGuards.FirstOrDefault();
+			if (lead != null)
+			{
+				var from = lead.GlobalPosition;
+				_walker.GlobalPosition = lead.GlobalPosition + new Vector3(18, 9, 18);
+				LookAt(lead.GlobalPosition);
+				await Seconds(1);
+				await Shot("2_patrol");
+				await Seconds(20);
+				GD.Print($"[patrol] the patrol walked {from.DistanceTo(lead.GlobalPosition):0} m in 20 s, mood {lead.State}");
+				_walker.GlobalPosition = lead.GlobalPosition + new Vector3(10, 6, 10);
+				LookAt(lead.GlobalPosition + Vector3.Up);
+				await Seconds(.5);
+				await Shot("3_patrol_later");
+			}
+			_walker.GlobalPosition = m + new Vector3(900, 40, 0);
+			await Seconds(3);
+			GD.Print($"[patrol] after leaving: real patrols {p.RealPatrols}");
+		}
+		GetTree().Quit();
+	}
+
 	/// <summary>The kit: HUD, both pages of the kit screen, attachments fitted (red dot, suppressor, light, laser) seen
 	/// in the field, and magazines being used up by reloads.</summary>
 	private async Task RunKitTest(string dir)

@@ -28,6 +28,15 @@ public partial class Guard : CharacterBody3D, IDamageable
     /// <summary>Patrol loop radius (m). A sentry uses a tiny one: he stands his post and looks around.</summary>
     public float PatrolMin = 12, PatrolMax = 22;
     public bool Sentry;
+    /// <summary>A road patrol: walk these points in order, then back again (a short smoke at each end). Set before
+    /// adding him to the scene. Null: the usual loop round <see cref="Home"/>.</summary>
+    public List<Vector3>? Route;
+    /// <summary>Where on the route he starts, and which way he's going.</summary>
+    public int RouteStart;
+    public bool RouteBackwards;
+    /// <summary>Where on his route he is now (the patrol system remembers it when he goes off-screen).</summary>
+    public int RouteIndex => _patrolIndex;
+    public bool RouteGoingBack => _routeBack;
     /// <summary>How many times he has gone from calm to alert (mission stats).</summary>
     public int TimesAlerted { get; private set; }
 
@@ -88,6 +97,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     private MeshInstance3D _flashSprite = null!;
     private readonly List<Vector3> _patrol = new();
     private int _patrolIndex;
+    private bool _routeBack;
     private float _wait, _stateTime, _sinceSeen = 999, _searchLeft, _reaction, _cooldown, _burst, _flash = -1;
     private int _warningShots;
     private float _bubbleLeft, _mutter = 12, _walkPhase, _stuck, _deathTime, _lookAround;
@@ -132,8 +142,14 @@ public partial class Guard : CharacterBody3D, IDamageable
         FloorMaxAngle = Mathf.DegToRad(50);
         BuildBody();
 
+        if (Route is { Count: > 1 })
+        {
+            _patrol.AddRange(Route);
+            _patrolIndex = Math.Clamp(RouteStart, 0, Route.Count - 1);
+            _routeBack = RouteBackwards;
+        }
         // A loop of four points around home, on the ground.
-        for (int k = 0; k < 4; k++)
+        else for (int k = 0; k < 4; k++)
         {
             float a = k * MathF.Tau / 4 + _rng.RandfRange(-.4f, .4f);
             float r = Sentry ? _rng.RandfRange(.5f, 1.5f) : _rng.RandfRange(PatrolMin, PatrolMax);
@@ -315,7 +331,23 @@ public partial class Guard : CharacterBody3D, IDamageable
                     if (_sitTimer <= 0) { _sitTimer = _rng.RandfRange(25, 45); _sitting = _rng.RandfRange(12, 22); SitsStarted++; }
                 }
                 var p = _patrol[_patrolIndex];
-                if (Flat(here - p) < 1.2f || _stuck > 2.5f)
+                if (Route != null && (Flat(here - p) < 1.5f || _stuck > 2.5f))
+                {
+                    // Road patrol: straight on to the next point; at either end, a pause, then turn round.
+                    _stuck = 0;
+                    int next = _patrolIndex + (_routeBack ? -1 : 1);
+                    if (next < 0 || next >= _patrol.Count)
+                    {
+                        if (_wait <= 0) _wait = _rng.RandfRange(8, 14);
+                        _wait -= dt;
+                        if (_wait > 0) return (here, 0, null);
+                        _routeBack = !_routeBack;
+                        next = _patrolIndex + (_routeBack ? -1 : 1);
+                    }
+                    _patrolIndex = Math.Clamp(next, 0, _patrol.Count - 1);
+                    p = _patrol[_patrolIndex];
+                }
+                else if (Flat(here - p) < 1.2f || _stuck > 2.5f)
                 {
                     _stuck = 0;
                     if (_wait <= 0) _wait = _rng.RandfRange(2, 5);

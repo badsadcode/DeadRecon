@@ -327,14 +327,21 @@ public partial class VillageLife : Node
         if (_jobs.TryGetValue(site.Index, out var job))
             return job.Done ? "You already did more than enough. The rice is staying in our sacks now." : $"The soldiers at {job.Checkpoint.Name} are still there. Still eating our rice.";
         var cp = NearestCheckpoint(site);
-        if (cp == null || SpawnGuard == null) return "Not today. Just... don't let anybody shoot at the chickens.";
+        if (cp == null || (SpawnGuard == null && Patrols.Current == null)) return "Not today. Just... don't let anybody shoot at the chickens.";
         job = new Job { Checkpoint = cp };
         _jobs[site.Index] = job;
-        // The checkpoint's garrison: a sentry by the barrier and a couple walking the road.
+        if (Patrols.Current != null)
+        {
+            // The checkpoint's own garrison (it's there whether you take the job or not).
+            if (Patrols.Current.IsCleared(cp.Index)) return $"{cp.Name}? Somebody already emptied it. ...It was you, wasn't it. Thank you!";
+            return $"The soldiers at {cp.Name} take a sack of rice from every cart. Every cart! It's {Compass(cp.Centre - site.Centre)} of here, " +
+                   $"about {Mathf.Round(cp.Centre.DistanceTo(site.Centre) / 50) * 50:0} metres. Make them stop, and we won't forget it.";
+        }
+        // No patrol system (some tests): the garrison turns up now.
         var c = cp.Centre with { Y = World.HeightAt(cp.Centre.X, cp.Centre.Z) };
-        job.Guards.Add(SpawnGuard(c + new Vector3(2.5f, 0, 1.5f), true));
-        job.Guards.Add(SpawnGuard(c + new Vector3(-3, 0, -4), false));
-        if (site.Kind == "town" || Support.Get(site.Index) > 30) job.Guards.Add(SpawnGuard(c + new Vector3(5, 0, -6), false));
+        job.Guards.Add(SpawnGuard!(c + new Vector3(2.5f, 0, 1.5f), true));
+        job.Guards.Add(SpawnGuard!(c + new Vector3(-3, 0, -4), false));
+        if (site.Kind == "town" || Support.Get(site.Index) > 30) job.Guards.Add(SpawnGuard!(c + new Vector3(5, 0, -6), false));
         return $"The soldiers at {cp.Name} take a sack of rice from every cart. Every cart! It's {Compass(cp.Centre - site.Centre)} of here, " +
                $"about {Mathf.Round(cp.Centre.DistanceTo(site.Centre) / 50) * 50:0} metres. Make them stop, and we won't forget it.";
     }
@@ -343,7 +350,10 @@ public partial class VillageLife : Node
     {
         foreach (var (site, job) in _jobs)
         {
-            if (job.Done || job.Guards.Count == 0 || !job.Guards.TrueForAll(g => !IsInstanceValid(g) || g.State == Guard.Mood.Dead)) continue;
+            bool clear = Patrols.Current != null && job.Guards.Count == 0
+                ? Patrols.Current.IsCleared(job.Checkpoint.Index)
+                : job.Guards.Count > 0 && job.Guards.TrueForAll(g => !IsInstanceValid(g) || g.State == Guard.Mood.Dead);
+            if (job.Done || !clear) continue;
             job.Done = true;
             Support.Change(site, 30, $"you cleared {job.Checkpoint.Name}");
             // A thank-you: whatever the village could find that a soldier might like.
