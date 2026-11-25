@@ -25,9 +25,25 @@ public partial class Villages : Node3D
         public Node3D Root = null!;
         public readonly List<(OmniLight3D Light, float Energy, bool Fire)> Lights = new();
         public readonly List<GpuParticles3D> Fires = new();
-        public readonly List<int> Plants = new();          // Foliage owners (wheat hides you), removed with the site
+        public readonly List<int> Plants = new();
+        public SiteLayout Layout = new();          // Foliage owners (wheat hides you), removed with the site
     }
     private readonly Dictionary<int, Built> _built = new();
+
+    /// <summary>Where things are in a built settlement, for the people who live there.</summary>
+    public sealed class SiteLayout
+    {
+        /// <summary>Door: where you stand outside (stairs foot / hut door). Top: the stairs' top (stilt houses; else
+        /// the door). Inside: in the doorway. Under: shelter under a stilt house (null for huts).</summary>
+        public sealed record House(Vector3 Door, Vector3 Top, Vector3 Inside, Vector3? Under);
+        public Vector3 Fire, Centre;
+        public Vector3? Well;
+        public readonly List<Vector3> Seats = new();
+        public readonly List<(Vector3 At, float Yaw)> Stalls = new();
+        public readonly List<House> Houses = new();
+    }
+    private SiteLayout _layout = new();
+    public SiteLayout? LayoutOf(int site) => _built.TryGetValue(site, out var b) ? b.Layout : null;
     private double _since = 1;
     private Settlements.Site? _inside;
 
@@ -178,6 +194,7 @@ public partial class Villages : Node3D
     private Built Build(Settlements.Site site)
     {
         var b = new Built { Root = new Node3D { Name = $"Site_{site.Index}" } };
+        _layout = b.Layout;
         var kit = new Kit();
         var rng = new RandomNumberGenerator { Seed = (ulong)site.Index * 7919 + 12345 };
         if (site.Kind == "outpost") Checkpoint(kit, b, site, rng);
@@ -200,8 +217,10 @@ public partial class Villages : Node3D
         var taken = new List<(Vector2 At, float R)> { (new Vector2(c.X, c.Z), site.Kind == "hamlet" ? 5 : 8) };
 
         // The middle: a well (not in hamlets) and the fire everyone sits around.
-        if (site.Kind != "hamlet") Well(kit, Ground(c + new Vector3(2.5f, 0, -1.5f)));
+        _layout.Centre = c;
+        if (site.Kind != "hamlet") { var well = Ground(c + new Vector3(2.5f, 0, -1.5f)); Well(kit, well); _layout.Well = well; }
         var fireAt = Ground(c + new Vector3(-2.5f, 0, 2));
+        _layout.Fire = fireAt;
         Campfire(kit, b, fireAt, rng);
 
         // Market stalls round the plaza (towns have a real market).
@@ -211,7 +230,9 @@ public partial class Villages : Node3D
             float a = k / (float)Math.Max(1, stalls) * MathF.Tau + rng.Randf() * .3f, r = site.Kind == "town" ? 11 : 7.5f;
             var at = c + new Vector3(MathF.Cos(a) * r, 0, MathF.Sin(a) * r);
             if (Towns.RoadAt(at.X, at.Z) > .3f) continue;
-            Stall(kit, Ground(at), MathF.Atan2(c.X - at.X, c.Z - at.Z), rng);
+            float sy = MathF.Atan2(c.X - at.X, c.Z - at.Z);
+            Stall(kit, Ground(at), sy, rng);
+            _layout.Stalls.Add((Ground(at + new Basis(Vector3.Up, sy) * new Vector3(0, 0, -.85f)), sy));
             taken.Add((new Vector2(at.X, at.Z), 2.2f));
         }
 
@@ -331,6 +352,9 @@ public partial class Villages : Node3D
             k.Box(_wood, new Vector3(.9f, .05f, .26f), L(new Vector3(sxs, -rise * f, front + run * (1 - f) - .02f)), solid: false);
         }
         Stairs.Add((H * new Vector3(sxs, -rise, front + run + .6f), H * new Vector3(sxs, 0, front - .4f)));
+        _layout.Houses.Add(new SiteLayout.House(H * new Vector3(sxs, -rise, front + run + .6f), H * new Vector3(sxs, .05f, front - .5f),
+                                                H * new Vector3(dx, .05f, d / 2 - .7f),
+                                                Ground(H * new Vector3(0, 0, 0))));
 
         // Inside: a sleeping mat; under the house: a firewood stack.
         k.Box(_mat, new Vector3(1.6f, .03f, 2), L(new Vector3(-w / 4, .015f, -d / 5)), solid: false);
@@ -368,6 +392,7 @@ public partial class Villages : Node3D
         var roofXf = L(new Vector3(0, wh + rh / 2 - .05f, 0), new Basis(Vector3.Up, MathF.PI / 2));
         k.Add(roof, prism, roofXf);
         k.Shape(prism.CreateConvexShape(), roofXf);
+        if (roof != _tin) { var door = Ground(H * new Vector3(0, 0, d / 2 + .9f)); _layout.Houses.Add(new SiteLayout.House(door, door, Ground(H * new Vector3(0, 0, 0)), null)); }
         return H * new Vector3(0, wh - .5f, 0);
     }
 
@@ -403,6 +428,7 @@ public partial class Villages : Node3D
         {
             float a = i / 3f * MathF.Tau + rng.Randf();
             var seat = Ground(at + new Vector3(MathF.Cos(a) * 2.2f, 0, MathF.Sin(a) * 2.2f));
+            _layout.Seats.Add(Ground(at + new Vector3(MathF.Cos(a + .35f) * 1.7f, 0, MathF.Sin(a + .35f) * 1.7f)));
             var basis = new Basis(Vector3.Up, -a) * new Basis(Vector3.Right, MathF.PI / 2);
             k.Add(_wood, new CylinderMesh { TopRadius = .18f, BottomRadius = .2f, Height = 1.6f }, new Transform3D(basis, seat + new Vector3(0, .15f, 0)));
         }

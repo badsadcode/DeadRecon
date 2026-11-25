@@ -22,6 +22,8 @@ public partial class Mission : Node3D
     public Weapon Rifle = null!;
     public TreeScatter Trees = null!;
     public readonly List<Guard> Guards = new();
+    /// <summary>The operation succeeded (you reached extraction with the intel).</summary>
+    public event Action? Completed;
     public bool SkipBriefing;
     /// <summary>Hour the operation starts (set by the scene from the seed).</summary>
     public float StartHour = 9;
@@ -291,6 +293,7 @@ public partial class Mission : Node3D
         {
             State = Phase.Complete;
             GD.Print($"[mission] complete in {Elapsed:0} s");
+            Completed?.Invoke();
             ShowPanel();
         }
 

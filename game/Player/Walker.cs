@@ -124,6 +124,9 @@ public partial class Walker : CharacterBody3D, IDamageable
         if (Dead) Died?.Invoke();
     }
 
+    /// <summary>Patched up (villagers, a medkit...).</summary>
+    public void Heal(float amount) { if (!Dead) Health = Math.Min(MaxHealth, Health + amount); }
+
     public void Respawn(Vector3 at, float yawDegrees)
     {
         Health = MaxHealth;

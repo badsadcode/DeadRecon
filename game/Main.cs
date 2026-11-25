@@ -32,6 +32,7 @@ public partial class Main : Node3D
 	private TimeOfDay _time = null!;
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
+	private DeadRecon.People.VillageLife _life = null!;
 	private DeadRecon.UI.PauseMenu _menu = null!;
 	private ColorRect _hurt = null!;
 	private Label _deathText = null!;
@@ -60,6 +61,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
+		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
 
 		var worldEnv = MakeEnvironment();
@@ -99,7 +101,8 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest"));
+		DeadRecon.People.Support.Persist = !testing;
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
@@ -143,6 +146,21 @@ public partial class Main : Node3D
 		}
 		_mission.Trees = _trees;
 		AddChild(_mission);
+		// Village people. Guards they ask you to deal with (checkpoints) are spawned through here.
+		_life = new DeadRecon.People.VillageLife
+		{
+			Villages = _villages, Towns = _towns, Player = _walker, World = _world, Mission = _mission,
+			SpawnGuard = (home, sentry) =>
+			{
+				home.Y = _world.HeightAt(home.X, home.Z) + .2f;
+				var g = new Guard { Target = _walker, Terrain = _terrain, World = _world, Home = home, Sentry = sentry, PatrolMin = 8, PatrolMax = 16 };
+				AddChild(g);
+				g.GlobalPosition = home;
+				_guards.Add(g);
+				return g;
+			},
+		};
+		AddChild(_life);
 
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
@@ -207,6 +225,8 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string lifeTest = Arg("lifetest", "");
+		if (lifeTest != "") _ = RunLifeTest(lifeTest);
 		string villageTest = Arg("villagetest", "");
 		if (villageTest != "") _ = RunVillageTest(villageTest);
 		string dayTest = Arg("daytest", "");
@@ -612,6 +632,94 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	/// <summary>Village life: a day in the nearest village (work, lunch, bed), gunfire panic, the headman's news,
+	/// help and job (its checkpoint guards killed), and shooting a villager. Prints what everyone is doing.</summary>
+	private async Task RunLifeTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_hud.Visible = false;
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 9;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		DeadRecon.People.Support.Reset();
+		var start = _walker.GlobalPosition;
+		Settlements.Site? village = null;
+		foreach (var s in _towns.Sites)
+			if (s.Kind == "village" && (village == null || s.Centre.DistanceTo(start) < village.Centre.DistanceTo(start))) village = s;
+		var c = village!.Centre;
+		void Census(string when)
+		{
+			var counts = new System.Collections.Generic.Dictionary<string, int>();
+			foreach (var v in _life.PeopleOf(village.Index)) { string k = $"{v.Activity}/{v.State}"; counts[k] = (counts.TryGetValue(k, out var n) ? n : 0) + 1; }
+			GD.Print($"[life] {when}: " + string.Join(", ", counts.Select(kv => $"{kv.Value} {kv.Key}")));
+		}
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = c + new Vector3(-12, 3, 10);
+		for (int f = 0; f < 2400 && (_trees.Pending > 0 || !_terrain.Settled || _life.Population == 0 || !_terrain.HasCollisionAt(c)); f++) await Frames(1);
+		await Seconds(2);
+		GD.Print($"[life] {village.Name}: {_life.Population} people, support {DeadRecon.People.Support.Get(village.Index):0}");
+		Census("09:00");
+		LookAt(c); await Shot("1_morning");
+		var farmer = _life.PeopleOf(village.Index).FirstOrDefault(v => v.Job == DeadRecon.People.Villager.Role.Farmer);
+		if (farmer != null)
+		{
+			await Seconds(20);
+			_walker.GlobalPosition = farmer.GlobalPosition + new Vector3(4, 2.2f, 4);
+			LookAt(farmer.GlobalPosition + Vector3.Up);
+			await Seconds(1); await Shot("2_farmer");
+			Census("09:00 +20s");
+		}
+		_time.Hour = 12;
+		_walker.GlobalPosition = c + new Vector3(-8, 2.5f, 7);
+		await Seconds(40);
+		Census("12:00 +40s");
+		LookAt(_villages.LayoutOf(village.Index)!.Fire); await Shot("3_lunch");
+		_time.Hour = 21.4f;
+		await Seconds(45);
+		Census("21:24 +45s");
+		await Shot("4_night");
+		_time.Hour = 9.5f;
+		await Seconds(30);
+		Census("09:30 +30s");
+		var chief = _life.HeadmanOf(village.Index);
+		if (chief != null) { _walker.GlobalPosition = chief.GlobalPosition + chief.GlobalTransform.Basis.Z * -2.2f + Vector3.Up * .2f; LookAt(chief.GlobalPosition + Vector3.Up * 1.4f); }
+		GD.Print($"[life] news: {_life.TestTalk(village.Index, 0)}");
+		GD.Print($"[life] help: {_life.TestTalk(village.Index, 1)}");
+		GD.Print($"[life] job: {_life.TestTalk(village.Index, 2)}");
+		await Frames(3); await Shot("6_dialog");
+		DeadRecon.Combat.Hearing.Make(c + new Vector3(30, 1, 0), DeadRecon.Combat.Hearing.Gunshot, _walker);
+		await Seconds(1);
+		Census("gunshot +1s");
+		await Seconds(15);
+		Census("gunshot +16s");
+		await Shot("5_panic");
+		GD.Print($"[life] support after gunfire: {DeadRecon.People.Support.Get(village.Index):0}");
+		var cpGuards = _guards.Where(g => g.Home.DistanceTo(c) > 100 && g.Home.DistanceTo(_mission.Camp) > 60).ToList();
+		GD.Print($"[life] checkpoint guards: {cpGuards.Count}");
+		foreach (var g in cpGuards) g.TakeHit(1000, g.GlobalPosition + Vector3.Up, g.GlobalPosition + new Vector3(10, 1, 0));
+		await Seconds(2);
+		GD.Print($"[life] support after the job: {DeadRecon.People.Support.Get(village.Index):0} ({DeadRecon.People.Support.LevelAt(village.Index)})");
+		GD.Print($"[life] help now: {_life.TestTalk(village.Index, 1)}");
+		var victim = _life.PeopleOf(village.Index).FirstOrDefault(v => !v.Indoors);
+		for (int k = 0; k < 2; k++) victim?.TakeHit(34, victim.GlobalPosition + Vector3.Up * 1.2f, victim.GlobalPosition + new Vector3(8, 1.5f, 0));
+		await Seconds(1);
+		GD.Print($"[life] support after shooting a villager: {DeadRecon.People.Support.Get(village.Index):0} ({DeadRecon.People.Support.LevelAt(village.Index)})");
+		DeadRecon.People.Support.Reset();
+		GetTree().Quit();
+	}
+
 	/// <summary>Villages and roads: photos of the nearest village (noon, golden hour, night, rain), a road, and a walk up a
 	/// house's stairs onto its veranda.</summary>
 	private async Task RunVillageTest(string dir)

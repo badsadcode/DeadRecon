@@ -30,6 +30,18 @@ public partial class Hud : Control
     private Font _font = null!;
     private static string _title = "", _subtitle = "";
     private static float _titleAge = 99;
+    private static string _prompt = "";
+    private static readonly List<(string Text, float Age)> _toasts = new();
+    private static string _dialogTitle = "", _dialogBody = "";
+    private static string[] _dialogOptions = Array.Empty<string>();
+    private static bool _dialogOpen;
+
+    /// <summary>An interaction prompt for this frame ("F  Talk to...").</summary>
+    public static void Prompt(string text) => _prompt = text;
+    /// <summary>A small line that fades after a few seconds (support changes...).</summary>
+    public static void Toast(string text) { _toasts.Add((text, 0)); if (_toasts.Count > 4) _toasts.RemoveAt(0); }
+    public static void ShowDialog(string title, string body, string[] options) { _dialogTitle = title; _dialogBody = body; _dialogOptions = options; _dialogOpen = true; }
+    public static void CloseDialog() => _dialogOpen = false;
 
     /// <summary>A quiet title card (entering a village...): fades in, holds, fades out.</summary>
     public static void Announce(string title, string subtitle) { _title = title; _subtitle = subtitle; _titleAge = 0; }
@@ -53,6 +65,7 @@ public partial class Hud : Control
     {
         float dt = (float)delta;
         _titleAge += dt;
+        for (int i = _toasts.Count - 1; i >= 0; i--) { var (t, age) = _toasts[i]; if (age + dt > 6) _toasts.RemoveAt(i); else _toasts[i] = (t, age + dt); }
         for (int i = _hurts.Count - 1; i >= 0; i--)
         {
             var (b, age) = _hurts[i];
@@ -76,6 +89,30 @@ public partial class Hud : Control
 
     public override void _Draw()
     {
+        {
+            var view = GetViewportRect().Size;
+            for (int i = 0; i < _toasts.Count; i++)
+            {
+                var (t, age) = _toasts[i];
+                float a = Math.Clamp(age * 3, 0, 1) * Math.Clamp((6 - age) / 1.5f, 0, 1);
+                Text(new Vector2(0, view.Y * .34f + i * 22), t, 16, new Color(Amber, a), HorizontalAlignment.Center, view.X);
+            }
+            if (_prompt != "" && !_dialogOpen) Text(new Vector2(0, view.Y * .62f), _prompt, 18, Ink, HorizontalAlignment.Center, view.X);
+            _prompt = "";
+            if (_dialogOpen)
+            {
+                float w = Math.Min(760, view.X - 60), x = (view.X - w) / 2, y = view.Y * .58f;
+                float bodyH = _font.GetMultilineStringSize(_dialogBody, HorizontalAlignment.Left, w - 40, 17).Y;
+                float h = 84 + bodyH + _dialogOptions.Length * 24;
+                DrawRect(new Rect2(x, y, w, h), new Color(0, 0, 0, .62f));
+                DrawRect(new Rect2(x, y, w, 2), new Color(Amber, .8f));
+                Text(new Vector2(x + 20, y + 28), _dialogTitle, 16, Amber);
+                DrawMultilineString(_font, new Vector2(x + 20, y + 56), _dialogBody, HorizontalAlignment.Left, w - 40, 17, -1, Ink);
+                for (int i = 0; i < _dialogOptions.Length; i++)
+                    Text(new Vector2(x + 20, y + 60 + bodyH + i * 24 + 10), _dialogOptions[i], 16, new Color(Ink, .8f));
+                Text(new Vector2(x + 20, y + h - 8), "F: done", 12, Dim);
+            }
+        }
         if (_titleAge < 5)
         {
             float a = Math.Clamp(_titleAge * 2, 0, 1) * Math.Clamp((5 - _titleAge) / 1.5f, 0, 1);

@@ -99,6 +99,8 @@ night. Darkness is a stealth tool like rain.
    (BadBuilding → NoorArchitect) where possible, exported to Noor Interchange. *(placeholder procedural stilt houses,
    huts, wells, stalls and checkpoints in `game/World/Villages.cs` until NoorArchitect exports exist)*
 4. **One village, alive.** Villagers with daily routines, a headman, support value, one or two local jobs.
+   *(done: `game/People/`. Daily schedule, rain shelter, gunfire panic, chats; support saved in user://villages.json;
+   headman news, healing, a bed for Loyal villages, and the checkpoint job. More jobs to come.)*
 5. **Roaming patrols** between sites, simulated cheaply off-screen, real near you.
 6. **The map and its memory.** A map screen with what you've discovered, site ownership, village support; persistence
    between sessions.
