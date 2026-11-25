@@ -116,6 +116,17 @@ public partial class KitScreen : Control
 
     public override void _Input(InputEvent e)
     {
+        // Mouse: handled here directly while open (the screen covers everything; Godot's GUI picking didn't
+        // reach this control under its CanvasLayer while the game is paused, so items couldn't be dragged).
+        if (IsOpen && e is InputEventMouse mouse)
+        {
+            if (_page == 2 && _map != null && _map.Visible && new Rect2(_map.GlobalPosition, _map.Size).HasPoint(mouse.Position))
+                _map.Handle(e.XformedBy(new Transform2D(0, -_map.GlobalPosition)));
+            else if (_page == 2 && _map != null) _map.Release();
+            OnMouse(e);
+            GetViewport().SetInputAsHandled();
+            return;
+        }
         if (e is not InputEventKey { Pressed: true, Echo: false } k) return;
         if (k.PhysicalKeycode == Key.M && _map != null)
         {
@@ -196,7 +207,7 @@ public partial class KitScreen : Control
 
     // ================================================================= mouse
 
-    public override void _GuiInput(InputEvent e)
+    private void OnMouse(InputEvent e)
     {
         if (e is InputEventMouseMotion mm)
         {
@@ -229,7 +240,6 @@ public partial class KitScreen : Control
                 _previewCam.Fov = Math.Clamp(_previewCam.Fov + (mb.ButtonIndex == MouseButton.WheelUp ? -2 : 2), 14, 40);
             QueueRedraw();
         }
-        AcceptEvent();
     }
 
     private (Kit.Grid Grid, Vector2 At)[] Grids => new[] { (Kit.Vest, VestAt), (Kit.Pack, PackAt) };
@@ -268,9 +278,10 @@ public partial class KitScreen : Control
     private void Drop()
     {
         var item = _drag!;
+        var target = DropTarget();   // before letting go: it works out where *the dragged item* would land
         _drag = null;
         if (_mouse.DistanceTo(_pressAt) < 4 && _dragRot == item.Rotated) return;   // a click, not a drag
-        if (DropTarget() is not { } t) return;
+        if (target is not { } t) return;
         if (!Kit.Move(item, t.Grid, t.X, t.Y, _dragRot)) Say("Doesn't fit there.");
     }
 

@@ -39,7 +39,8 @@ public partial class MapView : Control
     private Vector2 ToScreen(float x, float z) => Size / 2 + (new Vector2(x, z) - _centre) / _mpp;
     private Vector2 ToWorld(Vector2 s) => _centre + (s - Size / 2) * _mpp;
 
-    public override void _GuiInput(InputEvent e)
+    /// <summary>A mouse event in this view's own coordinates (the kit screen forwards them).</summary>
+    public void Handle(InputEvent e)
     {
         if (e is InputEventMouseMotion mm)
         {
@@ -74,8 +75,10 @@ public partial class MapView : Control
         float half = World.Half;
         _centre = new Vector2(Math.Clamp(_centre.X, -half, half), Math.Clamp(_centre.Y, -half, half));
         QueueRedraw();
-        AcceptEvent();
     }
+
+    /// <summary>The mouse left the map: stop panning.</summary>
+    public void Release() => _panning = false;
 
     public override void _Process(double delta) { if (Visible) QueueRedraw(); }
 

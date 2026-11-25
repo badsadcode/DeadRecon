@@ -349,7 +349,7 @@ public partial class Villages : Node3D
         for (int s = 1; s <= steps; s++)
         {
             float f = s / (steps + 1f);
-            k.Box(_wood, new Vector3(.9f, .05f, .26f), L(new Vector3(sxs, -rise * f, front + run * (1 - f) - .02f)), solid: false);
+            k.Box(_wood, new Vector3(.9f, .05f, .26f), L(new Vector3(sxs, -rise * f, front + run * f - .02f)), solid: false);
         }
         Stairs.Add((H * new Vector3(sxs, -rise, front + run + .6f), H * new Vector3(sxs, 0, front - .4f)));
         _layout.Houses.Add(new SiteLayout.House(H * new Vector3(sxs, -rise, front + run + .6f), H * new Vector3(sxs, .05f, front - .5f),

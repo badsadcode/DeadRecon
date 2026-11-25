@@ -873,6 +873,25 @@ public partial class Main : Node3D
 		_kitScreen.Open(0);
 		await Frames(30);
 		await Shot("2_backpack");
+		// Real mouse input: drag the first backpack magazine three cells right.
+		{
+			var view = GetViewport().GetVisibleRect().Size;
+			float sc = Math.Min(view.X / 1600, view.Y / 900);
+			var off = (view - new Vector2(1600, 900) * sc) / 2;
+			Vector2 Scr(Vector2 r) => r * sc + off;
+			var mag = k.Pack.Items.First(i => i.Def.Kind == DeadRecon.Gear.ItemKind.Magazine);
+			int x0 = mag.X;
+			var from = Scr(new Vector2(70, 340) + new Vector2(mag.X + .5f, mag.Y + .5f) * 58);
+			var to = from + new Vector2(0, 58 * 4) * sc;
+			GetViewport().PushInput(new InputEventMouseMotion { Position = from, GlobalPosition = from });
+			GetViewport().PushInput(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true, Position = from, GlobalPosition = from });
+			await Frames(3);
+			for (int i = 1; i <= 8; i++) { var p = from.Lerp(to, i / 8f); GetViewport().PushInput(new InputEventMouseMotion { Position = p, GlobalPosition = p, ButtonMask = MouseButtonMask.Left }); await Frames(1); }
+			await Shot("2b_dragging");
+			GetViewport().PushInput(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false, Position = to, GlobalPosition = to });
+			await Frames(3);
+			GD.Print($"[kit] drag test: magazine moved from ({x0},?) to ({mag.X},{mag.Y}) in {k.GridOf(mag)?.Name}");
+		}
 		_kitScreen.TestShow(k.Pack.Items.FirstOrDefault(i => i.Def == DeadRecon.Gear.ItemDef.Suppressor), 0);
 		await Frames(5);
 		await Shot("3_backpack_details");
@@ -1117,6 +1136,11 @@ public partial class Main : Node3D
 		foreach (var (foot, top) in _villages.Stairs)
 		{
 			if (foot.DistanceTo(c) > village.Radius + 10) continue;
+			_walker.SetFlying(true);
+			var side = (top - foot).Cross(Vector3.Up).Normalized();
+			_walker.GlobalPosition = (foot + top) / 2 + side * 4.5f + Vector3.Up * .4f;
+			LookAt((foot + top) / 2);
+			await Frames(20); await Shot("8b_stairs");
 			_walker.SetFlying(false);
 			_walker.GlobalPosition = foot + Vector3.Up * .3f;
 			LookAt(new Vector3(top.X, foot.Y + 1.65f, top.Z));
