@@ -1428,6 +1428,25 @@ public partial class Main : Node3D
 			await Frames(40);
 			await Shot(name);
 		}
+		// Tom's view: 17:54, in the forest, looking east (sun behind).
+		_time.Hour = 17.9f;
+		_walker.GlobalPosition = start + forest + Vector3.Up * .2f;
+		_walker.Look(-90, 0);
+		await Frames(40);
+		await Shot("g3_evening_east");
+		// Sunset sweep: brightness minute by minute through 17:40-18:20 must change smoothly (no flare).
+		var sweep = new System.Text.StringBuilder("[day] sunset sweep:");
+		for (float hh = 17.6f; hh <= 18.35f; hh += .05f)
+		{
+			_time.Hour = hh;
+			await Frames(8);
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			var img = GetViewport().GetTexture().GetImage();
+			img.Resize(64, 36);
+			float sum = 0; for (int yy = 0; yy < 36; yy++) for (int xx = 0; xx < 64; xx++) { var px = img.GetPixel(xx, yy); sum += .2126f * px.R + .7152f * px.G + .0722f * px.B; }
+			sweep.Append($" {hh:0.00}={sum / (64 * 36) * 255:0}");
+		}
+		GD.Print(sweep.ToString());
 		// Rocks, by day.
 		if (_rocks is { } rocks)
 		{

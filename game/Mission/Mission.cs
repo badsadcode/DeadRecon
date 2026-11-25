@@ -253,7 +253,10 @@ public partial class Mission : Node3D
         {
             float a = t * MathF.Tau / 3 + _rng.RandfRange(-.3f, .3f);
             var at = Ground(Camp + new Vector3(MathF.Cos(a), 0, MathF.Sin(a)) * 8.5f, 1.0f);
-            Prop(camp, new PrismMesh { Size = new Vector3(3.2f, 2.0f, 4.2f) }, canvas, at, -a + MathF.PI / 2, new Vector3(3.0f, 2.0f, 4.0f));
+            // Collision is the tent's own shape (a box round a prism left invisible walls beside the canvas).
+            var tent = new PrismMesh { Size = new Vector3(3.2f, 2.0f, 4.2f) };
+            var body = Prop(camp, tent, canvas, at, -a + MathF.PI / 2, Vector3.One);
+            ((CollisionShape3D)body.GetChild(1)).Shape = tent.CreateConvexShape();
         }
         // Crates (searchable: building supplies, sometimes magazines).
         var lootAt = Vector3.Zero;

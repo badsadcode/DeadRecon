@@ -58,9 +58,11 @@ public partial class TimeOfDay : Node
         Environment.SsaoIntensity = 1.5f;   // gentler contact shadows: under the canopy everything is already in shade
         Environment.TonemapWhite = 6;
         Environment.GlowEnabled = true;
-        Environment.GlowIntensity = .55f;
-        Environment.GlowBloom = .08f;
-        Environment.GlowHdrThreshold = 1.1f;
+        // Bloom: gentle, and from a soft threshold (a hard one makes things pop into glowing as they cross it).
+        Environment.GlowIntensity = .4f;
+        Environment.GlowBloom = .02f;
+        Environment.GlowHdrThreshold = 1.6f;
+        Environment.GlowHdrScale = 1.2f;
         Sun.LightVolumetricFogEnergy = 2.2f;
         Moon.LightVolumetricFogEnergy = 1.2f;
         Apply(0);
@@ -102,7 +104,9 @@ public partial class TimeOfDay : Node
         Sun.LightColor = k.SunColor;
         Sun.LightEnergy = k.SunEnergy * (1 - .7f * rain) * Mathf.SmoothStep(-2, 4, elev);
         Sun.Visible = elev > -4;
-        Sun.ShadowEnabled = elev > 2;
+        // Shadows stay on until the sun is really gone (it's dim by then). Switching them off at 2 degrees, while the
+        // volumetric fog was still lit, made the whole forest flare up at once: the "boom" at sunset.
+        Sun.ShadowEnabled = elev > -1.5f;
         Sun.LightSpecular = 1 - .9f * rain;
         Sun.SkyMode = rain > .35f ? DirectionalLight3D.SkyModeEnum.LightOnly : DirectionalLight3D.SkyModeEnum.LightAndSky;
         // Moon: opposite the sun, cold and dim; enough to move by, not enough to read a map.
@@ -135,8 +139,9 @@ public partial class TimeOfDay : Node
         Environment.FogDensity = k.FogDensity * (1 + 2.2f * rain);
         Environment.FogHeightDensity = .0015f + .004f * k.Mist;
         Environment.VolumetricFogEnabled = DeadRecon.UI.Settings.LightShafts;
-        Environment.VolumetricFogDensity = k.Shafts * 1.15f * (1 + .2f * rain);   // thicker fog darkens everything: the god rays (post) do the beams
-        Sun.LightVolumetricFogEnergy = 3.4f * (1 - .85f * rain);           // no sunbeams through a storm (else: red murk at dusk)
+        Environment.VolumetricFogDensity = k.Shafts * .7f * (1 + .2f * rain);   // thicker fog darkens everything: the god rays (post) do the beams
+        // Low sun: less (a golden-hour sun lights the whole fog volume orange, even behind you).
+        Sun.LightVolumetricFogEnergy = Mathf.Lerp(1.1f, 2f, Mathf.SmoothStep(10, 40, elev)) * Mathf.SmoothStep(0, 6, elev) * (1 - .85f * rain);           // no sunbeams through a storm (else: red murk at dusk)
         Environment.VolumetricFogAlbedo = fog.Lerp(Colors.White, .65f).Lerp(new Color(.6f, .64f, .68f), rain * .7f);   // mostly neutral: the light colours it, not the air
         Environment.AmbientLightEnergy = k.Ambient * (1 - .12f * rain) + flash * 3;
         Environment.TonemapExposure = k.Exposure * (1 + .12f * rain);
