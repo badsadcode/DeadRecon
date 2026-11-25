@@ -185,6 +185,7 @@ public static class RifleBuilder
         if (def.Kind == ItemKind.Magazine) return Part("Magazine");
         if (def.Model.StartsWith("rifle:")) return Part(def.Model[6..]);
         if (def.Model == "") return null;
+        if (def.Model.StartsWith("res://")) return ResourceLoader.Exists(def.Model) ? ResourceLoader.Load<PackedScene>(def.Model).Instantiate<Node3D>() : null;
         string path = AttachmentDir + def.Model + ".glb";
         return ResourceLoader.Exists(path) ? ResourceLoader.Load<PackedScene>(path).Instantiate<Node3D>() : null;
     }

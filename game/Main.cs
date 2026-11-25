@@ -303,6 +303,8 @@ public partial class Main : Node3D
 		if (rainTest != "") _ = RunRainTest(rainTest);
 		string missionTest = Arg("missiontest", "");
 		if (missionTest != "") _ = RunMissionTest(missionTest);
+		string viewModel = Arg("viewmodel", "");
+		if (viewModel != "") { _viewOnly = true; _ = ViewModel(viewModel, Arg("out", "user://view")); return; }
 		string dumpContent = Arg("dumpcontent", "");
 		if (dumpContent != "")
 		{
@@ -381,8 +383,11 @@ public partial class Main : Node3D
 		if (squadTest != "") _ = RunSquadTest(squadTest);
 	}
 
+	private bool _viewOnly;
+
 	public override void _Process(double delta)
 	{
+		if (_viewOnly) return;
 		if (_terrain == null) return;
 		if (_waitingForGround && _terrain.HasCollisionAt(_walker.GlobalPosition))
 		{
@@ -409,6 +414,7 @@ public partial class Main : Node3D
 
 	public override void _UnhandledInput(InputEvent e)
 	{
+		if (_viewOnly) return;
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F9 } && _hud != null)
 		{
 			DeadRecon.UI.Settings.ShowDebug = !DeadRecon.UI.Settings.ShowDebug;
@@ -875,6 +881,33 @@ public partial class Main : Node3D
 		for (int page = 0; page < 3; page++) { radio.Open(page); await Frames(5); await Shot($"4_radio_page{page + 1}"); }
 		radio.Close();
 		foreach (var (kind, opSeed) in DeadRecon.Base.RadioScreen.Offers()) GD.Print($"[base] offer: {Mission.NameFor(opSeed)}: {Mission.Describe(kind)}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Photograph a model from four sides on a plain background (--viewmodel=res://... --out=dir).</summary>
+	private async Task ViewModel(string path, string dir)
+	{
+		Directory.CreateDirectory(dir);
+		var vp = new SubViewport { Size = new Vector2I(900, 700), OwnWorld3D = true, RenderTargetUpdateMode = SubViewport.UpdateMode.Always };
+		AddChild(vp);
+		vp.AddChild(new WorldEnvironment { Environment = new Godot.Environment { BackgroundMode = Godot.Environment.BGMode.Color, BackgroundColor = new Color(.55f, .58f, .6f), AmbientLightSource = Godot.Environment.AmbientSource.Color, AmbientLightColor = Colors.White, AmbientLightEnergy = .6f } });
+		vp.AddChild(new DirectionalLight3D { RotationDegrees = new Vector3(-45, -35, 0), LightEnergy = 1.3f });
+		var model = ResourceLoader.Load<PackedScene>(path).Instantiate<Node3D>();
+		vp.AddChild(model);
+		var box = DeadRecon.Gear.RifleBuilder.Bounds(model);
+		GD.Print($"[view] {path}: size {box.Size}, from {box.Position}");
+		foreach (var n in DeadRecon.Gear.RifleBuilder.FindAll<MeshInstance3D>(model)) GD.Print($"[view]   {n.Name}: {DeadRecon.Gear.RifleBuilder.InModel(model, n) * n.Mesh.GetAabb()}");
+		var cam = new Camera3D { Fov = 40 };
+		vp.AddChild(cam);
+		float r = box.Size.Length() * 1.4f;
+		var c = box.GetCenter();
+		int k = 0;
+		foreach (var side in new[] { new Vector3(1, .5f, 1), new Vector3(-1, .4f, .3f), new Vector3(0, .3f, -1), new Vector3(.2f, 1.6f, .3f) })
+		{
+			cam.LookAtFromPosition(c + side.Normalized() * r, c, Vector3.Up);
+			for (int f = 0; f < 4; f++) await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			vp.GetTexture().GetImage().SavePng(Path.Combine(dir, $"view{k++}.png"));
+		}
 		GetTree().Quit();
 	}
 

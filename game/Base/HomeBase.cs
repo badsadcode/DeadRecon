@@ -178,19 +178,37 @@ public partial class HomeBase : Node3D
         var sand = M(new Color(.52f, .48f, .36f), .97f);
 
         // The radio on a crate-table, a stool, and a little fire.
-        var table = At(0, 0, .4f);
-        Box(wood, new Vector3(1.2f, .8f, .7f), table, s.Yaw);
-        Radio = table + Vector3.Up * .55f;
-        var radio = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.45f, .28f, .3f) }, MaterialOverride = olive };
-        _built.AddChild(radio);
-        radio.GlobalPosition = Radio;
-        radio.Rotation = new Vector3(0, s.Yaw, 0);
-        var antenna = new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = .005f, BottomRadius = .008f, Height = 1.3f }, MaterialOverride = M(new Color(.1f, .1f, .1f)) };
+        Node3D radio;
+        if (DeadRecon.World.Props.MakeTable() is { } tableModel)
+        {
+            // Tom's folding table, his ham radio on it, front panel facing the stool.
+            var ground = At(0, 0);
+            _built.AddChild(tableModel);
+            tableModel.GlobalPosition = ground;
+            tableModel.Rotation = new Vector3(0, s.Yaw, 0);
+            radio = DeadRecon.World.Props.MakeRadio()!;
+            _built.AddChild(radio);
+            radio.GlobalPosition = ground + new Basis(Vector3.Up, s.Yaw) * new Vector3(-.2f, 0, 0) + Vector3.Up * DeadRecon.World.Props.TableTop;
+            radio.Rotation = new Vector3(0, s.Yaw, 0);
+            Radio = radio.GlobalPosition + Vector3.Up * .12f;
+        }
+        else
+        {
+            var table = At(0, 0, .4f);
+            Box(wood, new Vector3(1.2f, .8f, .7f), table, s.Yaw);
+            Radio = table + Vector3.Up * .55f;
+            radio = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.45f, .28f, .3f) }, MaterialOverride = olive };
+            _built.AddChild(radio);
+            radio.GlobalPosition = Radio;
+            radio.Rotation = new Vector3(0, s.Yaw, 0);
+        }
+        float k = DeadRecon.World.Props.Has(DeadRecon.World.Props.Radio) ? 1 / DeadRecon.World.Props.RadioScale : 1;
+        var antenna = new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = .005f, BottomRadius = .008f, Height = 1.3f }, MaterialOverride = M(new Color(.1f, .1f, .1f)), Scale = Vector3.One * k };
         radio.AddChild(antenna);
-        antenna.Position = new Vector3(.15f, .75f, 0);
-        _lamp = new OmniLight3D { LightColor = new Color(.6f, 1f, .5f), LightEnergy = .25f, OmniRange = 1.2f };
+        antenna.Position = new Vector3(.18f, .75f, -.1f) * k;
+        _lamp = new OmniLight3D { LightColor = new Color(.6f, 1f, .5f), LightEnergy = .25f, OmniRange = 1.2f, Scale = Vector3.One * k };
         radio.AddChild(_lamp);
-        _lamp.Position = new Vector3(-.1f, .1f, .16f);
+        _lamp.Position = new Vector3(-.05f, .15f, .2f) * k;
         Box(wood, new Vector3(.45f, .45f, .45f), At(0, 1.2f, .22f), s.Yaw + .4f);
         var fire = At(-3, 2);
         for (int l = 0; l < 3; l++)

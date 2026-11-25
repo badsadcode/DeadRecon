@@ -77,7 +77,7 @@ public partial class Mission : Node3D
         Phase.Intel => Kind switch
         {
             Op.Prisoner when !HasKey && _keyHolder != null && IsInstanceValid(_keyHolder) => _keyHolder.GlobalPosition,
-            Op.Intel when _intelTaken => _desk + new Vector3(-.35f, .54f, 0),
+            Op.Intel when _intelTaken => new Vector3(_desk.X - .3f, _deskTop + .12f, _desk.Z),
             Op.Officer => Officer is { } o && IsInstanceValid(o) ? o.GlobalPosition : Camp,
             Op.Prisoner when _cageOpen => _prisoner?.GlobalPosition,
             _ => IntelAt,
@@ -97,6 +97,7 @@ public partial class Mission : Node3D
     private int _treesAtStart;
     private string _why = "";
     private Vector3 _desk;
+    private float _deskTop;
     private float _fuse = -1;
     private readonly List<Node3D> _cache = new();
     private Villager? _prisoner;
@@ -298,24 +299,44 @@ public partial class Mission : Node3D
         }
         // The radio desk.
         var desk = _desk;
-        Prop(camp, new BoxMesh { Size = new Vector3(1.6f, .8f, .8f) }, wood, desk, .3f, new Vector3(1.6f, .8f, .8f));
-        var radio = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.45f, .28f, .3f) }, MaterialOverride = olive };
-        camp.AddChild(radio);
-        radio.GlobalPosition = desk + new Vector3(-.35f, .54f, 0);
+        Node3D radio;
+        _deskTop = _desk.Y + .4f;
+        if (DeadRecon.World.Props.MakeTable() is { } table)
+        {
+            // The table stands on the ground; its top is where the box desk's top was (near enough).
+            camp.AddChild(table);
+            table.GlobalPosition = Ground(desk);
+            table.Rotation = new Vector3(0, .3f, 0);
+            float top = Ground(desk).Y + DeadRecon.World.Props.TableTop;
+            radio = DeadRecon.World.Props.MakeRadio() ?? new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.45f, .28f, .3f) }, MaterialOverride = olive };
+            camp.AddChild(radio);
+            radio.GlobalPosition = new Vector3(desk.X, top, desk.Z) + new Basis(Vector3.Up, .3f) * new Vector3(-.3f, 0, 0);
+            radio.Rotation = new Vector3(0, .3f, 0);
+            _deskTop = top;
+        }
+        else
+        {
+            Prop(camp, new BoxMesh { Size = new Vector3(1.6f, .8f, .8f) }, wood, desk, .3f, new Vector3(1.6f, .8f, .8f));
+            radio = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.45f, .28f, .3f) }, MaterialOverride = olive };
+            camp.AddChild(radio);
+            radio.GlobalPosition = desk + new Vector3(-.35f, .54f, 0);
+        }
         var antenna = new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = .005f, BottomRadius = .008f, Height = 1.1f }, MaterialOverride = Mat(.1f, .1f, .1f) };
         radio.AddChild(antenna);
-        antenna.Position = new Vector3(.15f, .65f, 0);
+        antenna.Position = new Vector3(.15f, .65f, 0) / (DeadRecon.World.Props.Has(DeadRecon.World.Props.Radio) ? DeadRecon.World.Props.RadioScale : 1);
+        if (DeadRecon.World.Props.Has(DeadRecon.World.Props.Radio)) antenna.Scale = Vector3.One / DeadRecon.World.Props.RadioScale;
         switch (Kind)
         {
             case Op.Radio:
                 _intelProp = radio;           // you take the radio itself
-                IntelAt = radio.GlobalPosition;
+                IntelAt = radio.GlobalPosition + Vector3.Up * .12f;
                 break;
             case Op.Intel:
             case Op.Officer:
                 _intelProp = new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(.24f, .05f, .32f) }, MaterialOverride = Mat(.55f, .12f, .08f) };
                 camp.AddChild(_intelProp);
-                _intelProp.GlobalPosition = _desk + new Vector3(.35f, .43f, 0);
+                _intelProp.GlobalPosition = new Vector3(_desk.X + .35f, _deskTop + .03f, _desk.Z);
+                IntelAt = _intelProp.GlobalPosition;
                 if (Kind == Op.Officer) _intelProp.Visible = false;
                 break;
             case Op.Cache:
@@ -472,7 +493,7 @@ public partial class Mission : Node3D
     {
         Op.Officer => null,
         Op.Prisoner when !HasKey => null,
-        Op.Intel when _intelTaken => _desk + new Vector3(-.35f, .54f, 0),
+        Op.Intel when _intelTaken => new Vector3(_desk.X - .3f, _deskTop + .12f, _desk.Z),
         Op.Cache when _fuse >= 0 => null,
         Op.Prisoner when _cageOpen => null,
         Op.None => null,

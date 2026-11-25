@@ -49,7 +49,7 @@ public partial class IconBaker : Node
         foreach (var def in ItemDef.All.Values)
         {
             var d = def;
-            if (d.Kind is ItemKind.Attachment or ItemKind.Magazine)
+            if (d.Kind is ItemKind.Attachment or ItemKind.Magazine || d.Model.StartsWith("res://"))
                 Request($"item:{d.Id}", () => RifleBuilder.ModelFor(d), d.Kind == ItemKind.Magazine ? new Vector2I(128, 256) : new Vector2I(256, 160));
         }
     }

@@ -222,7 +222,7 @@
       "capacity": 0,
       "heal": 0,
       "slot": "None",
-      "model": ""
+      "model": "res://assets/ham_radio.glb"
     },
     {
       "id": "supplies",
