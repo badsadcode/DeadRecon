@@ -1068,10 +1068,23 @@ public partial class Main : Node3D
 			await Frames(30);
 			await Shot($"{name}_forest");
 		}
+		// The sky itself: looking up, and toward the setting sun (west is yaw 90).
+		foreach (var (hour, look, name) in new[] { (11f, yaw, "s1_noon_sky"), (17.6f, 90f, "s2_golden_sky"), (18.4f, 90f, "s3_sunset_sky"), (22.5f, yaw, "s4_night_sky") })
+		{
+			_time.Hour = hour;
+			_walker.GlobalPosition = start + Vector3.Up * 40;
+			_walker.Look(look, 22);
+			await Frames(30);
+			await Shot(name);
+		}
 		_time.Hour = 18.6f; _weather.SetNow(Weather.Kind.Rain);
 		_walker.GlobalPosition = start + Vector3.Up * 3; _walker.Look(yaw, -6);
 		await Frames(40);
 		await Shot("8_rainy_dusk");
+		_time.Hour = 14;
+		_walker.GlobalPosition = start + Vector3.Up * 40; _walker.Look(yaw, 22);
+		await Frames(60);
+		await Shot("s5_storm_sky");
 		GetTree().Quit();
 	}
 

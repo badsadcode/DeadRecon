@@ -123,9 +123,10 @@ public partial class TimeOfDay : Node
         Sky.SetShaderParameter("sun_glow", k.Glow);
         Sky.SetShaderParameter("sun_disc", 1 - Math.Clamp(rain * 2.5f, 0, 1));
         Sky.SetShaderParameter("stars", k.Stars * (1 - Math.Clamp(rain * 3, 0, 1)));
-        Sky.SetShaderParameter("overcast", Math.Clamp(rain * 1.1f, 0, 1));
+        Sky.SetShaderParameter("overcast", Math.Clamp(rain * 1.1f, 0, 1) * .55f);   // the clouds do most of the work now
         Sky.SetShaderParameter("overcast_color", grey);
         Sky.SetShaderParameter("flash", flash * .9f);
+        Clouds(k, dt, rain, bright, flash);
 
         // Air: distance fog takes the sky's horizon colour; mist pools in valleys at dawn; light shafts in the trees.
         var fog = k.Fog.Lerp(grey * 1.05f, rain * .9f).Lerp(new Color(.85f, .88f, 1f), flash * .8f);
@@ -138,6 +139,36 @@ public partial class TimeOfDay : Node
         Environment.VolumetricFogAlbedo = fog.Lerp(Colors.White, .65f).Lerp(new Color(.6f, .64f, .68f), rain * .7f);   // mostly neutral: the light colours it, not the air
         Environment.AmbientLightEnergy = k.Ambient * (1 - .12f * rain) + flash * 3;
         Environment.TonemapExposure = k.Exposure * (1 + .12f * rain);   // eyes adapt to the gloom a little
+    }
+
+    private Vector2 _cloudShift = new(13.7f, 4.2f);
+
+    /// <summary>
+    /// The cloud deck: drifts with the wind (faster in a storm), covers more of the sky as rain comes, lit by the sun's
+    /// colour (orange at dusk) or the moon's grey-blue at night. Its shadows cross the ground (global shader params).
+    /// </summary>
+    private void Clouds(Key k, float dt, float rain, float bright, float flash)
+    {
+        var wind = new Vector2(.0028f, .0011f) * (1 + 2.5f * rain);
+        _cloudShift += wind * dt;
+        // Fair-weather cover wanders through the day; rain brings a full deck.
+        float fair = .3f + .22f * (.5f + .5f * MathF.Sin(Hour * .9f + 1.3f)) + .1f * MathF.Sin(Hour * 2.3f);
+        float cover = Mathf.Lerp(fair, 1, Math.Clamp(rain * 1.3f, 0, 1));
+        float day = Math.Clamp(k.SunEnergy / 1.1f, 0, 1);
+        var lit = k.SunColor.Lerp(Colors.White, .35f) * (.75f + .35f * day);
+        lit = new Color(.17f, .2f, .28f).Lerp(lit, Mathf.SmoothStep(0, .35f, day));
+        var shade = (k.Horizon * .5f + k.Top * .3f) * (.55f + .45f * day);
+        var storm = new Color(.36f, .38f, .40f) * Mathf.Lerp(.25f, 1, bright);
+        lit = lit.Lerp(storm * 1.25f, rain * .85f).Lerp(new Color(.9f, .92f, 1f), flash * .8f);
+        shade = shade.Lerp(storm * .7f, rain * .85f).Lerp(new Color(.7f, .75f, .9f), flash * .6f);
+        Sky.SetShaderParameter("cloud_offset", _cloudShift);
+        Sky.SetShaderParameter("cloud_cover", cover);
+        Sky.SetShaderParameter("cloud_lit", lit);
+        Sky.SetShaderParameter("cloud_shade", shade);
+        RenderingServer.GlobalShaderParameterSet("cloud_shift", _cloudShift * 900);   // sky units to metres on the ground (roughly)
+        RenderingServer.GlobalShaderParameterSet("cloud_cover", cover);
+        // Shadows only show in sunlight, and not under a full grey deck (it's all shade then).
+        RenderingServer.GlobalShaderParameterSet("cloud_shadow", .3f * Math.Clamp(k.SunEnergy, 0, 1) * (1 - Math.Clamp(rain * 1.5f, 0, 1)));
     }
 
     /// <summary>A starting hour for an operation, from its seed: mostly daytime, sometimes dawn, dusk or night.</summary>

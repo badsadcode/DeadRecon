@@ -23,6 +23,11 @@ uniform float settle_half = 4096.0;     // region half size (m)
 uniform float settle_spacing = 2.0;     // metres per texel
 uniform float settle_px = 4097.0;       // texels per side
 
+// Cloud shadows drifting across the ground (set by TimeOfDay).
+global uniform vec2 cloud_shift;
+global uniform float cloud_cover;
+global uniform float cloud_shadow;
+
 varying vec3 world_pos;
 varying vec3 world_normal;
 
@@ -163,6 +168,12 @@ void fragment() {
 	rough = mix(rough, 0.62, wetness * (0.6 + 0.4 * h));    // wet: a soft sheen, strongest on the raised bits
 	albedo = mix(albedo, albedo * 0.3 + vec3(0.008, 0.008, 0.006), puddle * 0.9);   // muddy water, not a mirror
 	rough = mix(rough, 0.3, puddle);
+
+	// Cloud shadow: big soft patches moving with the wind.
+	vec2 cp = (p + cloud_shift) * 0.0016;
+	float cn = noise(cp) * 0.6 + noise(cp * 2.3 + 5.0) * 0.3 + noise(cp * 5.1 + 9.0) * 0.1;
+	float cs = smoothstep(1.0 - cloud_cover * 0.85, 1.0 - cloud_cover * 0.85 + 0.18, cn);
+	albedo *= 1.0 - cloud_shadow * cs;
 
 	ALBEDO = albedo;
 	ROUGHNESS = rough;

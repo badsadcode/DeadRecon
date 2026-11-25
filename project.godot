@@ -28,3 +28,18 @@ project/assembly_name="DeadRecon"
 
 renderer/rendering_method="forward_plus"
 anti_aliasing/quality/msaa_3d=2
+
+[shader_globals]
+
+cloud_shift={
+"type": "vec2",
+"value": Vector2(0, 0)
+}
+cloud_cover={
+"type": "float",
+"value": 0.4
+}
+cloud_shadow={
+"type": "float",
+"value": 0.0
+}
