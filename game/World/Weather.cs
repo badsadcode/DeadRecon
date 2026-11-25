@@ -37,7 +37,8 @@ public partial class Weather : Node3D
     /// <summary>How wet the world is, 0..1: soaks in over about a minute of rain, dries over a few minutes.</summary>
     public float Wetness { get; private set; }
     /// <summary>Multiplier on guard sight range (1 clear .. ~0.6 in a storm).</summary>
-    public float SightFactor => 1 - .4f * Intensity;
+    /// <summary>Multiplier on guard sight: rain and darkness both shorten it.</summary>
+    public float SightFactor => (1 - .4f * Intensity) * (1 - .55f * (TimeOfDay.Current?.Darkness ?? 0));
     public bool AutoChange { get; set; } = true;
     /// <summary>0 open sky .. 1 thick canopy overhead (fewer drops reach you there).</summary>
     public float UnderCanopy { get; private set; }
@@ -46,9 +47,9 @@ public partial class Weather : Node3D
 
     private GpuParticles3D _rain = null!, _splash = null!;
     private AudioStreamPlayer _patter = null!, _roar = null!;
-    private ProceduralSkyMaterial? _sky;
-    private Color _skyTop, _skyHorizon, _fogColor;
-    private float _sunEnergy, _fogDensity, _ambient, _nextChange = 150, _nextLightning = 10, _flash = -1;
+    private float _nextChange = 150, _nextLightning = 10, _flash = -1;
+    /// <summary>0..1 lightning brightness right now.</summary>
+    public float Flash { get; private set; }
     private readonly RandomNumberGenerator _rng = new() { Seed = 4242 };
     private readonly List<(float delay, float volume)> _pendingThunder = new();
     private AudioStreamPlayer _thunder = null!;
@@ -56,12 +57,6 @@ public partial class Weather : Node3D
     public override void _Ready()
     {
         Current = this;
-        _sky = Environment.Sky?.SkyMaterial as ProceduralSkyMaterial;
-        if (_sky != null) { _skyTop = _sky.SkyTopColor; _skyHorizon = _sky.SkyHorizonColor; }
-        _fogColor = Environment.FogLightColor;
-        _fogDensity = Environment.FogDensity;
-        _ambient = Environment.AmbientLightEnergy;
-        _sunEnergy = Sun.LightEnergy;
         BuildRain();
         _patter = Loop(RainLoop(heavy: false), -80);
         _roar = Loop(RainLoop(heavy: true), -80);
@@ -145,33 +140,14 @@ public partial class Weather : Node3D
         _rain.Emitting = r > .01f;
         _splash.AmountRatio = Math.Max(r, .001f);
 
-        // Mood: greyer sky, thicker mist, weaker light.
-        if (_sky != null)
-        {
-            _sky.SkyTopColor = _skyTop.Lerp(new Color(.32f, .35f, .38f), r * .85f);
-            _sky.SkyHorizonColor = _skyHorizon.Lerp(new Color(.52f, .55f, .55f), r * .8f);
-        }
-        Environment.FogLightColor = _fogColor.Lerp(new Color(.48f, .52f, .52f), r);
-        Environment.FogDensity = _fogDensity * (1 + 2.2f * r);
-        float flash = 0;
+        // The light itself (sky, fog, sun, ambient) is TimeOfDay's job: it reads Intensity and Flash.
+        Flash = 0;
         if (_flash >= 0)
         {
             _flash += dt;
             // Two quick flickers.
-            flash = _flash < .07f ? 1 : _flash < .14f ? .15f : _flash < .22f ? .8f : 0;
+            Flash = _flash < .07f ? 1 : _flash < .14f ? .15f : _flash < .22f ? .8f : 0;
             if (_flash > .3f) _flash = -1;
-        }
-        // Under clouds: no sun disc, no sun glints on wet ground. Lightning is a cold white flash of the whole sky
-        // and the air, not more sunshine.
-        Sun.LightEnergy = _sunEnergy * (1 - .65f * r);
-        Sun.LightSpecular = 1 - .9f * r;
-        Sun.SkyMode = r > .35f ? DirectionalLight3D.SkyModeEnum.LightOnly : DirectionalLight3D.SkyModeEnum.LightAndSky;
-        Environment.AmbientLightEnergy = _ambient * (1 - .3f * r) + flash * 3f;
-        Environment.FogLightColor = Environment.FogLightColor.Lerp(new Color(.85f, .88f, 1f), flash * .8f);
-        if (_sky != null)
-        {
-            _sky.SkyTopColor = _sky.SkyTopColor.Lerp(new Color(.75f, .78f, .9f), flash * .7f);
-            _sky.SkyHorizonColor = _sky.SkyHorizonColor.Lerp(new Color(.85f, .87f, .95f), flash * .7f);
         }
 
         Terrain.SetWetness(Wetness);

@@ -71,6 +71,7 @@ public partial class PauseMenu : CanvasLayer
 
         Check(box, "Invert mouse Y", Settings.InvertY, v => Settings.InvertY = v);
         Check(box, "Bullet tracers", Settings.Tracers, v => Settings.Tracers = v);
+        Check(box, "Light shafts (volumetric fog)", Settings.LightShafts, v => Settings.LightShafts = v);
         Check(box, "Show debug info (F3)", Settings.ShowDebug, v => Settings.ShowDebug = v);
 
         box.AddChild(new HSeparator());

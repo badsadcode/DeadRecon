@@ -29,6 +29,7 @@ public partial class Main : Node3D
 	private readonly System.Collections.Generic.List<Guard> _guards = new();
 	private Mission _mission = null!;
 	private Weather _weather = null!;
+	private TimeOfDay _time = null!;
 	private DeadRecon.UI.PauseMenu _menu = null!;
 	private ColorRect _hurt = null!;
 	private Label _deathText = null!;
@@ -66,6 +67,8 @@ public partial class Main : Node3D
 			LightColor = new Color(1f, .93f, .80f), DirectionalShadowMaxDistance = 200,
 		};
 		AddChild(sun);
+		var moon = new DirectionalLight3D { LightColor = new Color(.62f, .72f, 1f), LightEnergy = 0, DirectionalShadowMaxDistance = 120, ShadowBlur = 2 };
+		AddChild(moon);
 
 		_walker = new Walker { ProcessMode = ProcessModeEnum.Disabled };
 		AddChild(_walker);
@@ -93,10 +96,11 @@ public partial class Main : Node3D
 		layer.AddChild(_deathText);
 
 		// The operation: picked before planting so the camp and landing zone are clearings.
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest"));
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		_mission.Plan(seed, spawn.position);
+		_mission.StartHour = TimeOfDay.StartHourFor(seed);
 
 		_terrain = new TerrainStreamer { World = _world, Viewer = _walker };
 		_trees = new TreeScatter { World = _world, Viewer = _walker };
@@ -137,6 +141,13 @@ public partial class Main : Node3D
 
 		_weather = new Weather { Camera = _walker.Camera, Environment = worldEnv.Environment, Sun = sun, Terrain = _terrain, Trees = _trees, Cover = _cover };
 		AddChild(_weather);
+		_time = new TimeOfDay
+		{
+			Environment = worldEnv.Environment, Sun = sun, Moon = moon, Sky = (ShaderMaterial)worldEnv.Environment.Sky.SkyMaterial,
+			Hour = _mission.StartHour,
+		};
+		AddChild(_time);
+		AddChild(new Fireflies { Camera = _walker.Camera, World = _world });
 		AddChild(new DeadRecon.Audio.Ambience { Camera = _walker.Camera });
 		AddChild(new DeadRecon.Combat.Ballistics());
 		_walker.SurfaceAt = p =>
@@ -188,6 +199,8 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string dayTest = Arg("daytest", "");
+		if (dayTest != "") _ = RunDayTest(dayTest);
 		string ragTest = Arg("ragdolltest", "");
 		if (ragTest != "") _ = RunRagdollTest(ragTest);
 		string charTest = Arg("chartest", "");
@@ -218,7 +231,7 @@ public partial class Main : Node3D
 			$"weather: {_weather.Describe()}  (rain {_weather.Intensity * 100:0}%, wet {_weather.Wetness * 100:0}%, canopy overhead {_weather.UnderCanopy * 100:0}%)" +
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
-			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take  F4: fly (Space/Ctrl up/down)   N: weather   T: textured/painted ground   Esc: release mouse";
+			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take  F4: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
 		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
@@ -232,6 +245,8 @@ public partial class Main : Node3D
 			DeadRecon.UI.Settings.Save();
 			_hud.Visible = DeadRecon.UI.Settings.ShowDebug;
 		}
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.K } && _time != null)
+			_time.Hour = (_time.Hour + 2) % 24;   // debug: skip ahead two hours
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.N } && _weather != null)
 			_weather.Cycle();
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.T } && _terrain != null)
@@ -583,6 +598,48 @@ public partial class Main : Node3D
 			Key(Godot.Key.W, false);
 			GD.Print($"[move] walked into trunk r {t.TrunkRadius:0.00} (base y {t.BaseY:0.0}, top {t.TrunkTop:0.0}, me y {_walker.GlobalPosition.Y:0.0}): closest {closest:0.00} m from the axis (want >= {t.TrunkRadius + .35f:0.00})");
 		}
+		GetTree().Quit();
+	}
+
+	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	private async Task RunDayTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[day] {name}: {Engine.GetFramesPerSecond()} fps, darkness {_time.Darkness:0.00}");
+		}
+		_hud.Visible = false;
+		foreach (var h in FindChildren("*", "", true, false)) if (h is DeadRecon.UI.Hud hud) hud.Visible = false;
+		_weather.AutoChange = false;
+		_weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		_weapon.Visible = false;
+		for (int f = 0; f < 1800 && (_waitingForGround || _trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		var start = _walker.GlobalPosition;
+		float yaw = Mathf.RadToDeg(_walker.Rotation.Y);
+		var forest = ForestSpot(start);
+		foreach (var (hour, name) in new[] { (5.9f, "1_dawn"), (7.3f, "2_morning"), (12f, "3_noon"), (17.2f, "4_golden"), (18.4f, "5_sunset"), (19.5f, "6_dusk"), (22.5f, "7_night") })
+		{
+			_time.Hour = hour;
+			_walker.SetFlying(true);
+			_walker.GlobalPosition = start + Vector3.Up * 3;
+			_walker.Look(yaw, -6);
+			await Frames(30);
+			await Shot($"{name}_river");
+			_walker.GlobalPosition = start + forest + Vector3.Up * .2f;
+			_walker.Look(yaw + 200, 4);
+			await Frames(30);
+			await Shot($"{name}_forest");
+		}
+		_time.Hour = 18.6f; _weather.SetNow(Weather.Kind.Rain);
+		_walker.GlobalPosition = start + Vector3.Up * 3; _walker.Look(yaw, -6);
+		await Frames(40);
+		await Shot("8_rainy_dusk");
 		GetTree().Quit();
 	}
 
@@ -1249,12 +1306,7 @@ public partial class Main : Node3D
 	/// <summary>Humid tropical daylight: hazy sky, thick aerial perspective, mist pooling in low valleys.</summary>
 	private static WorldEnvironment MakeEnvironment()
 	{
-		var sky = new ProceduralSkyMaterial
-		{
-			SkyTopColor = new Color(.34f, .48f, .60f), SkyHorizonColor = new Color(.78f, .80f, .74f),
-			GroundHorizonColor = new Color(.62f, .66f, .58f), GroundBottomColor = new Color(.14f, .17f, .12f),
-			SunAngleMax = 40,
-		};
+		var sky = new ShaderMaterial { Shader = GD.Load<Shader>("res://game/World/sky.gdshader") };
 		var env = new Godot.Environment
 		{
 			BackgroundMode = Godot.Environment.BGMode.Sky,

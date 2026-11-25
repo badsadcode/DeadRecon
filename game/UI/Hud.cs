@@ -84,7 +84,7 @@ public partial class Hud : Control
         float frac = Player.Health / Walker.MaxHealth;
         DrawRect(new Rect2(hp, new Vector2(220 * frac, 10)), frac > .35f ? Ink : Danger);
         string stance = Player.Flying ? "flying" : Player.Crouching ? "crouched" : Player.Running ? "running" : "standing";
-        Text(hp + new Vector2(0, -10), $"{stance.ToUpper()}   {Weather.Describe()}", 15, Dim);
+        Text(hp + new Vector2(0, -10), $"{stance.ToUpper()}   {Weather.Describe()}   {TimeOfDay.Current?.Clock}", 15, Dim);
 
         // Ammo (bottom right).
         if (Rifle.Loaded)

@@ -23,6 +23,8 @@ public partial class Mission : Node3D
     public TreeScatter Trees = null!;
     public readonly List<Guard> Guards = new();
     public bool SkipBriefing;
+    /// <summary>Hour the operation starts (set by the scene from the seed).</summary>
+    public float StartHour = 9;
 
     public Phase State { get; private set; } = Phase.Briefing;
     public string OperationName { get; private set; } = "";
@@ -351,6 +353,8 @@ public partial class Mission : Node3D
                 $"{OperationName.ToUpper()}\n\n" +
                 $"Objective: take {IntelName} from the radio desk at a small enemy camp, about {campDist:0} m {Compass(Camp - Player.GlobalPosition)} of you. {_why}\n\n" +
                 $"Then get to the landing zone. Look for the green smoke.\n\n" +
+                $"Insertion at {(int)StartHour:00}:{(int)(StartHour % 1 * 60):00} ({TimeOfDay.Describe(StartHour)}). " +
+                (StartHour < 5.5f || StartHour > 19.3f ? "It's dark: they won't see you far, but you won't see much either.\n\n" : "\n\n") +
                 (Guards.Count <= 2 ? "Intel says one guard on patrol and one sentry by the radio. Both are reported to be in a bad mood.\n\n"
                                    : $"Intel says {Guards.Count} guards: a sentry by the radio and {Guards.Count - 1} on patrol. All of them are reported to be in a bad mood.\n\n") +
                 "Tip: crouch (hold C, or Alt to toggle) in the ferns. Rain covers your footsteps.\n\n" +

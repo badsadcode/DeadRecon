@@ -17,6 +17,8 @@ public static class Settings
     public static float MasterVolume { get; set; } = .8f;
     public static float AmbienceVolume { get; set; } = 1;
     public static bool Tracers { get; set; } = true;
+    /// <summary>Volumetric fog: light shafts through the canopy. Costs some frame rate.</summary>
+    public static bool LightShafts { get; set; } = true;
 
     // What difficulty does to the guards.
     /// <summary>How far and how quickly guards notice you.</summary>
@@ -47,6 +49,7 @@ public static class Settings
         MasterVolume = Math.Clamp((float)cfg.GetValue("audio", "master", .8f), 0, 1);
         AmbienceVolume = Math.Clamp((float)cfg.GetValue("audio", "ambience", 1f), 0, 1.5f);
         Tracers = (bool)cfg.GetValue("game", "tracers", true);
+        LightShafts = (bool)cfg.GetValue("video", "light_shafts", true);
     }
 
     public static void Save()
@@ -60,6 +63,7 @@ public static class Settings
         cfg.SetValue("audio", "master", MasterVolume);
         cfg.SetValue("audio", "ambience", AmbienceVolume);
         cfg.SetValue("game", "tracers", Tracers);
+        cfg.SetValue("video", "light_shafts", LightShafts);
         cfg.Save(Path);
     }
 }
