@@ -610,7 +610,13 @@ public partial class Mission : Node3D
         GD.Print($"[mission] complete in {Elapsed:0} s");
         Completed?.Invoke();
         Kit.Current?.RemoveIntel();   // handed over
-        if (Kind == Op.Prisoner && _prisoner != null && IsInstanceValid(_prisoner)) _prisoner.Say("Home sweet... tarp. I'll take it. Thank you.");
+        if (Kind == Op.Prisoner && _prisoner != null && IsInstanceValid(_prisoner))
+        {
+            _prisoner.Say(ExtractHome ? "Home sweet... tarp. I'll take it. Thank you. I'll be by the fire." : "My ride! Thank you. Drinks are on me. Well, on HQ.");
+            // He sits by your fire (or waits at the landing zone) until the next operation picks him up.
+            var spot = HomeBase.Current?.Radio is { } radio && ExtractHome ? radio + new Vector3(-2.2f, 0, 3.2f) : Extraction + new Vector3(2, 0, 2);
+            _prisoner.Rest(spot with { Y = World.HeightAt(spot.X, spot.Z) });
+        }
         int reward = Reward(Kind);
         if (reward > 0 && Kit.Current is { } kit)
         {

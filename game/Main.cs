@@ -884,6 +884,13 @@ public partial class Main : Node3D
 		for (int f = 0; f < 900 && !_terrain.HasCollisionAt(ex); f++) await Frames(1);
 		await Seconds(4);
 		GD.Print($"[op] at the way out: {_mission.State}; supplies {_kit.AllItems.Where(i => i.Def == DeadRecon.Gear.ItemDef.Supplies).Sum(i => i.Count)}");
+		if (_mission.Prisoner is { } p2)
+		{
+			var stop = p2.GlobalPosition;
+			_walker.GlobalPosition = ex with { Y = _world.HeightAt(ex.X, ex.Z) + .5f } + new Vector3(40, 0, 0);
+			await Seconds(5);
+			GD.Print($"[op] after you walk away, the prisoner moved {stop.DistanceTo(p2.GlobalPosition):0.0} m (following {p2.Following})");
+		}
 		GetTree().Quit();
 	}
 

@@ -37,6 +37,10 @@ public partial class Villager : CharacterBody3D, IDamageable
     /// <summary>Lost in the jungle (a job): sits tight and calls out until you find him (F), then follows you.</summary>
     public bool Lost;
     public bool Following { get; private set; }
+    private Vector3? _restAt;
+
+    /// <summary>Done following: walk to this spot and sit there (a rescued man at your fire).</summary>
+    public void Rest(Vector3 at) { Following = false; _restAt = at; }
     /// <summary>What you say to get him to follow, his answer, and what he calls out (lost farmers by default).</summary>
     public string FoundPrompt = "\"It's alright. Follow me.\"";
     public string FoundLine = "Oh, thank goodness! I thought I'd be eaten! Lead the way, I'm right behind you.";
@@ -367,6 +371,17 @@ public partial class Villager : CharacterBody3D, IDamageable
     private void BeLost(float dt)
     {
         float dist = Player.GlobalPosition.DistanceTo(GlobalPosition);
+        if (_restAt is { } rest)
+        {
+            bool there = new Vector2(rest.X - GlobalPosition.X, rest.Z - GlobalPosition.Z).Length() < .6f;
+            Move(rest, there ? 0 : 1.4f, dt);
+            _crouch = Mathf.MoveToward(_crouch, there ? 1 : 0, dt * 3);
+            if (_body != null) { _body.Crouch = _crouch; _body.Speed = new Vector2(Velocity.X, Velocity.Z).Length(); }
+            if (there) _face = rest + (rest - GlobalPosition) + Vector3.Forward;
+            UpdateBubble(dt);
+            Steps(dt);
+            return;
+        }
         bool f = Input.IsPhysicalKeyPressed(Key.F), fPressed = f && !_fWas;
         _fWas = f;
         if (!Following)
