@@ -113,6 +113,18 @@ night. Darkness is a stealth tool like rain.
 Each step is playable on its own. Co-op stays planned for later; this design assumes several players in the same world
 and nothing here should block it.
 
+## Home, the radio and building *(built)*
+
+- The first operation is to steal a field radio. Set it up anywhere quiet (Tab, right-click the radio): that's home
+  (`game/Base/HomeBase.cs`, saved in user://base.json). You start there.
+- The radio (F): three generated operations at a time (steal intel, blow up a supply cache, take out an officer,
+  rescue a prisoner), a new set after each one; HQ chatter and rumours drawn from the real world (patrols,
+  checkpoints, village moods, weather); the build list.
+- Building supplies: in crates at enemy camps and checkpoint stores, and as pay. Build a shelter (sleep, start there),
+  a supply crate (restock once per operation), sandbag walls and a watchtower. No tree-felling survival loop.
+- Getting out means walking home once you have one.
+- An intro sequence (Tom's idea, with our characters) is planned for later.
+
 ## Open questions for Tom and Noor
 
 - Era and sides: still open (GDD). Locals need a look and a language: gibberish like the guards?

@@ -73,6 +73,23 @@ public static class UiStyle
                 c.DrawString(Bold, mid + new Vector2(-s * .3f, s * .14f), "RICE", HorizontalAlignment.Center, s * .6f, (int)(s * .16f), new Color(.4f, .25f, .12f));
                 break;
             }
+            case "field_radio":
+            {
+                var box = new Rect2(mid - new Vector2(s * .3f, s * .22f), new Vector2(s * .6f, s * .46f));
+                c.DrawRect(box, new Color(.30f, .34f, .2f));
+                c.DrawRect(box, new Color(.15f, .17f, .1f), false, 2);
+                c.DrawCircle(box.Position + new Vector2(s * .15f, s * .23f), s * .08f, new Color(.12f, .12f, .1f));
+                c.DrawRect(new Rect2(box.Position + new Vector2(s * .3f, s * .1f), new Vector2(s * .22f, s * .1f)), new Color(.55f, .65f, .4f));
+                c.DrawLine(box.Position + new Vector2(s * .52f, 0), box.Position + new Vector2(s * .62f, -s * .3f), new Color(.1f, .1f, .1f), 2);
+                break;
+            }
+            case "supplies":
+            {
+                var plank = new Color(.62f, .48f, .3f);
+                for (int i = 0; i < 3; i++) c.DrawRect(new Rect2(mid + new Vector2(-s * .34f, -s * .25f + i * s * .17f), new Vector2(s * .68f, s * .13f)), plank * (1 - i * .08f));
+                c.DrawRect(new Rect2(mid + new Vector2(-s * .12f, s * .1f), new Vector2(s * .3f, s * .2f)), new Color(.55f, .52f, .38f));
+                break;
+            }
             case "intel":
             {
                 var folder = new Rect2(mid - new Vector2(s * .38f, s * .28f), new Vector2(s * .76f, s * .56f));

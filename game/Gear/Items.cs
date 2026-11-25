@@ -37,6 +37,8 @@ public sealed record ItemDef(
     public static readonly ItemDef Foregrip = Add(new("grip_vgrip", "Vertical foregrip", "Something to hold on to. Less recoil, steadier aim.", ItemKind.Attachment, 1, 1, .15f, Slot: Slot.Underbarrel, Model: "BadGun_underbarrel_vgrip_vietnam_97232"));
 
     public static readonly ItemDef RiceSacks = Add(new("rice_sacks", "Sack of rice", "Twenty kilos of somebody's harvest, for somebody else's dinner. Heavy, lumpy, important.", ItemKind.Cargo, 2, 2, 20f));
+    public static readonly ItemDef FieldRadio = Add(new("field_radio", "Field radio", "Heavy, olive, crackly. Set it up somewhere quiet and that's home: operations, news and gossip come through it. (Right-click: set up camp here.)", ItemKind.Cargo, 2, 2, 6f));
+    public static readonly ItemDef Supplies = Add(new("supplies", "Building supplies", "Planks, sandbags, tin sheet, rope, nails. Whatever wasn't nailed down at their camp. Build with it at the radio.", ItemKind.Cargo, 1, 1, 1.5f, Stack: 10));
     public static readonly ItemDef Intel = Add(new("intel", "Intel", "What you came for. Don't lose it, don't read it, don't spill rice on it.", ItemKind.Intel, 2, 2, .4f));
 }
 

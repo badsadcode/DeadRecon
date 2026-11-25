@@ -32,6 +32,8 @@ public partial class Main : Node3D
 	private TimeOfDay _time = null!;
 	private static Vector3? _continueFrom;
 	private static float _continueYaw;
+	private static bool _carryOn;
+	private static float? _lastHour;
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
 	private DeadRecon.Gear.Kit _kit = null!;
@@ -66,7 +68,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -91,6 +93,16 @@ public partial class Main : Node3D
 			spawn = (here with { Y = _world.HeightAt(here.X, here.Z) + .2f }, _continueYaw);
 			_continueFrom = null;
 		}
+		// With a home, you start there (unless you're carrying on from where an operation ended).
+		DeadRecon.Base.HomeBase.Persist = !testing;
+		if (!testing && !_carryOn && DeadRecon.Base.HomeBase.Saved is { } homeState)
+		{
+			var hb = new Basis(Vector3.Up, homeState.Yaw);
+			var at = new Vector3(homeState.X, 0, homeState.Z) + hb * new Vector3(1.5f, 0, 2.5f);
+			spawn = (at with { Y = _world.HeightAt(at.X, at.Z) + .3f }, Mathf.RadToDeg(homeState.Yaw));
+		}
+		_carryOn = false;
+		DeadRecon.Gear.Kit.ClearLoot();
 		_spawn = spawn;
 		_walker.GlobalPosition = spawn.position;
 		_walker.Look(spawn.yaw, -4);
@@ -120,8 +132,14 @@ public partial class Main : Node3D
 		// The operation: picked before planting so the camp and landing zone are clearings.
 		int seed = int.TryParse(Arg("seed", ""), out int fixedSeed) ? fixedSeed : (int)(Time.GetUnixTimeFromSystem() * 1000 % int.MaxValue);
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
-		_mission.Plan(seed, spawn.position);
-		_mission.StartHour = TimeOfDay.StartHourFor(seed);
+		// Which operation: what the radio picked; otherwise (no home yet) go and steal a radio; at home, none.
+		var op = Mission.Op.Intel;
+		if (Mission.Next is { } next) { op = next.Kind; seed = next.Seed; Mission.Next = null; }
+		else if (!testing) op = DeadRecon.Base.HomeBase.Saved != null ? Mission.Op.None : Mission.Op.Radio;
+		if (Arg("op", "") is { Length: > 0 } opArg && Enum.TryParse<Mission.Op>(opArg, true, out var forced)) op = forced;
+		_mission.Plan(seed, spawn.position, op);
+		_mission.StartHour = op == Mission.Op.None ? (TimeOfDay.Current?.Hour ?? _lastHour ?? TimeOfDay.StartHourFor(seed)) : TimeOfDay.StartHourFor(seed);
+		if (DeadRecon.Base.HomeBase.Position is { } homePos) TreeScatter.Clearings.Add((new Vector2(homePos.X, homePos.Z), DeadRecon.Base.HomeBase.Radius + 4));
 
 		_terrain = new TerrainStreamer { World = _world, Viewer = _walker };
 		_trees = new TreeScatter { World = _world, Viewer = _walker };
@@ -131,6 +149,7 @@ public partial class Main : Node3D
 		AddChild(_cover);
 		_villages = new Villages { World = _world, Towns = _towns, Viewer = _walker };
 		AddChild(_villages);
+		AddChild(new DeadRecon.Base.HomeBase { Player = _walker, World = _world });
 
 		// The camp's guards: a grumpy patroller and a grumpier sentry by the radio desk.
 		Guard AddGuard(Vector3 home, bool sentry)
@@ -143,8 +162,11 @@ public partial class Main : Node3D
 			_mission.Guards.Add(g);
 			return g;
 		}
+		if (op != Mission.Op.None)
+		{
 		_guard = AddGuard(_mission.Camp + new Vector3(0, 0, -2), sentry: false);
-		AddGuard(_mission.IntelAt + new Vector3(.8f, 0, 1.6f), sentry: true);
+		var sentryGuard = AddGuard(_mission.Desk + new Vector3(-.8f, 0, 1.6f), sentry: true);
+		if (op == Mission.Op.Officer) _mission.Officer = sentryGuard;
 		// Bigger camps on higher difficulty and some operations: extra patrollers walking wider loops.
 		var extra = new RandomNumberGenerator { Seed = (ulong)seed * 31 + 7 };
 		int extras = DeadRecon.UI.Settings.Difficulty switch
@@ -158,6 +180,7 @@ public partial class Main : Node3D
 			float a = extra.Randf() * MathF.Tau;
 			var g = AddGuard(_mission.Camp + new Vector3(MathF.Cos(a), 0, MathF.Sin(a)) * 12, sentry: false);
 			g.PatrolMin = 24; g.PatrolMax = 38;
+		}
 		}
 		_mission.Trees = _trees;
 		AddChild(_mission);
@@ -227,6 +250,16 @@ public partial class Main : Node3D
 		DeadRecon.UI.MapMemory.Persist = !testing;
 		AddChild(new DeadRecon.UI.MapMemory { Player = _walker, World = _world });
 		DeadRecon.UI.MapPainter.Warm(_world, _towns);   // paints in the background; ready long before you press M
+		kitLayer.AddChild(new DeadRecon.Base.RadioScreen
+		{
+			Player = _walker,
+			StartOperation = (kind, opSeed) =>
+			{
+				Mission.Next = (kind, opSeed);
+				_lastHour = null;
+				GetTree().ReloadCurrentScene();
+			},
+		});
 		_kitScreen = new DeadRecon.UI.KitScreen { Kit = _kit, Player = _walker, World = _world, Towns = _towns, Mission = _mission };
 		kitLayer.AddChild(_kitScreen);
 		_menu = new DeadRecon.UI.PauseMenu { Walker = _walker };
@@ -269,6 +302,10 @@ public partial class Main : Node3D
 		if (rangeTest != "") _ = RunRangeTest(rangeTest);
 		string gunTest = Arg("guntest", "");
 		if (gunTest != "") _ = RunGunTest(gunTest);
+		string baseTest = Arg("basetest", "");
+		if (baseTest != "") _ = RunBaseTest(baseTest);
+		string opTest = Arg("optest", "");
+		if (opTest != "") _ = RunOpTest(opTest);
 		string jobTest = Arg("jobtest", "");
 		if (jobTest != "") _ = RunJobTest(jobTest);
 		string patrolTest = Arg("patroltest", "");
@@ -333,9 +370,13 @@ public partial class Main : Node3D
 			_terrain.TextureMix = _terrain.TextureMix > .5f ? 0 : 1;
 		// Dead or done: Enter starts a new operation (same jungle, new camp; felled trees stay felled).
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _mission != null
-			&& (_walker.Dead || _mission.State == Mission.Phase.Complete))
+			&& (_walker.Dead || _mission.State == Mission.Phase.Failed || (_mission.State == Mission.Phase.Complete && DeadRecon.Base.HomeBase.Saved == null)))
 		{
-			if (!_walker.Dead && !_walker.Flying) { _continueFrom = _walker.GlobalPosition; _continueYaw = Mathf.RadToDeg(_walker.Rotation.Y); }
+			// No home yet: the next operation starts where you're standing. With a home (or after dying), back home.
+			if (!_walker.Dead && !_walker.Flying && DeadRecon.Base.HomeBase.Saved == null)
+			{
+				_continueFrom = _walker.GlobalPosition; _continueYaw = Mathf.RadToDeg(_walker.Rotation.Y); _carryOn = true;
+			}
 			GetTree().ReloadCurrentScene();
 		}
 	}
@@ -685,6 +726,130 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Atmosphere check: the same two views at seven times of day (clear weather), plus a rainy dusk.</summary>
+	/// <summary>Home: steal the radio (--op=radio), set it up, build everything, look at it by day and night, and the
+	/// radio screen's three pages.</summary>
+	private async Task RunBaseTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[base] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		GD.Print($"[base] operation: {_mission.Kind}, {_mission.Objective()}");
+		_mission.TestTakeIntel();
+		GD.Print($"[base] radio in the kit: {_kit.AllItems.Any(i => i.Def == DeadRecon.Gear.ItemDef.FieldRadio)}; {_mission.Objective()}");
+		// Somewhere quiet: 320 m from the camp, the other side from it.
+		var away = (_spawn.position - _mission.Camp) with { Y = 0 };
+		var at = _mission.Camp + away.Normalized() * 330;
+		string? why = "";
+		for (int k = 0; k < 24 && why != null; k++)
+		{
+			var tryAt = _mission.Camp + away.Normalized().Rotated(Vector3.Up, k * .5f) * (330 + k * 10);
+			tryAt.Y = _world.HeightAt(tryAt.X, tryAt.Z);
+			why = DeadRecon.Base.HomeBase.Establish(tryAt, 0, _world);
+			if (why == null) at = tryAt; else GD.Print($"[base] not there: {why}");
+		}
+		var radioItem = _kit.AllItems.FirstOrDefault(i => i.Def == DeadRecon.Gear.ItemDef.FieldRadio);
+		if (radioItem != null) _kit.Remove(radioItem);
+		await Seconds(1);
+		GD.Print($"[base] home at {DeadRecon.Base.HomeBase.Position}: mission {_mission.State}; supplies {_kit.AllItems.Where(i => i.Def == DeadRecon.Gear.ItemDef.Supplies).Sum(i => i.Count)}");
+		_kit.Add(DeadRecon.Gear.ItemDef.Supplies, 40, quiet: true);
+		foreach (var b in DeadRecon.Base.HomeBase.Catalogue) DeadRecon.Base.HomeBase.Build(b.Id);
+		var home = DeadRecon.Base.HomeBase.Position!.Value with { Y = _world.HeightAt(at.X, at.Z) };
+		foreach (var h in FindChildren("*", nameof(ColorRect), true, false)) if (h is ColorRect cr && cr.Size == new Vector2(760, 360)) cr.Visible = false;   // the debrief
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = home + new Vector3(9, 26, 9);
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		await Seconds(1);
+		LookAt(home);
+		await Shot("1_home_from_above");
+		_walker.GlobalPosition = home + new Vector3(4, 1.7f, 6);
+		LookAt(home + Vector3.Up * .8f);
+		await Frames(20);
+		await Shot("2_home_ground");
+		_time.Hour = 22;
+		await Frames(30);
+		await Shot("3_home_night");
+		_time.Hour = 10;
+		for (int k = 0; k < 6; k++) { var (who, text) = DeadRecon.Base.Chatter.Next(home); DeadRecon.Base.Chatter.Add(who, text); GD.Print($"[base] radio: {who}: {text}"); }
+		var radio = DeadRecon.Base.RadioScreen.Current!;
+		for (int page = 0; page < 3; page++) { radio.Open(page); await Frames(5); await Shot($"4_radio_page{page + 1}"); }
+		radio.Close();
+		foreach (var (kind, opSeed) in DeadRecon.Base.RadioScreen.Offers()) GD.Print($"[base] offer: {Mission.NameFor(opSeed)}: {Mission.Describe(kind)}");
+		GetTree().Quit();
+	}
+
+	/// <summary>One operation of the kind --op names (cache, officer, prisoner, intel): do the objective, get out.</summary>
+	private async Task RunOpTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[op] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		GD.Print($"[op] {_mission.OperationName}: {_mission.Kind}; {_mission.Objective()}");
+		var t = _mission.Target ?? _mission.Camp;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = t + new Vector3(7, 4, 7);
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(t)); f++) await Frames(1);
+		await Seconds(1.5);
+		LookAt(t);
+		await Shot("1_objective");
+		_mission.TestTakeIntel();
+		await Seconds(1.5);
+		GD.Print($"[op] after the objective: {_mission.State}; {_mission.Objective()}");
+		await Shot("2_after");
+		if (_mission.Kind == Mission.Op.Prisoner && _mission.Prisoner is { } pr)
+		{
+			_walker.SetFlying(false);
+			_walker.GlobalPosition = pr.GlobalPosition + new Vector3(0, .5f, 2.4f);
+			await Seconds(1.5);
+			LookAt(pr.GlobalPosition + Vector3.Up);
+			await Shot("3_prisoner");
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = true });
+			await Frames(3);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = false });
+			await Seconds(1);
+			GD.Print($"[op] prisoner following: {pr.Following}; {_mission.State}");
+		}
+		_walker.SetFlying(false);
+		var ex = _mission.Extraction;
+		_walker.GlobalPosition = ex with { Y = _world.HeightAt(ex.X, ex.Z) + .5f };
+		for (int f = 0; f < 900 && !_terrain.HasCollisionAt(ex); f++) await Frames(1);
+		await Seconds(4);
+		GD.Print($"[op] at the way out: {_mission.State}; supplies {_kit.AllItems.Where(i => i.Def == DeadRecon.Gear.ItemDef.Supplies).Sum(i => i.Count)}");
+		GetTree().Quit();
+	}
+
 	/// <summary>Village jobs: take each kind from the nearest village's headman and finish it (checkpoint, patrol,
 	/// missing farmer walked home, rice delivered), with photos of the HUD line, the map and the lost farmer.</summary>
 	private async Task RunJobTest(string dir)

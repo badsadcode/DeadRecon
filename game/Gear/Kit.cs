@@ -64,6 +64,18 @@ public partial class Kit : Node
 
     private float _healLeft;
     private readonly HashSet<Guard> _searched = new();
+
+    /// <summary>Places to search once (crates at a camp or a checkpoint): where, the prompt, what you get (returns a message).</summary>
+    private static readonly List<(Vector3 At, string Prompt, Func<Kit, string> Give)> Loot = new();
+    public static void AddLoot(Vector3 at, string prompt, Func<Kit, string> give, string? key = null)
+    {
+        if (key != null && (Looted.Contains(key) || LootKeys.Contains(key))) return;   // already there, or already taken
+        if (key != null) LootKeys.Add(key);
+        Loot.Add((at, prompt, kit => { if (key != null) Looted.Add(key); return give(kit); }));
+    }
+    private static readonly HashSet<string> LootKeys = new(), Looted = new();
+    public static void ClearLoot() { Loot.Clear(); LootKeys.Clear(); }
+    public static int LootCount => Loot.Count;
     private bool _fWas, _hWas, _lWas;
 
     public IEnumerable<Item> AllItems => Vest.Items.Concat(Pack.Items);
@@ -269,6 +281,14 @@ public partial class Kit : Node
             Hud.Prompt("F   Search the body");
             if (fKey && !_fWas && captured) Search(body);
         }
+        else if (!Player.Dead)
+            for (int i = 0; i < Loot.Count; i++)
+            {
+                if (Loot[i].At.DistanceTo(Player.GlobalPosition) > 2.2f) continue;
+                Hud.Prompt($"F   {Loot[i].Prompt}");
+                if (fKey && !_fWas && captured) { Hud.Toast(Loot[i].Give(this)); Loot.RemoveAt(i); }
+                break;
+            }
         _fWas = fKey;
     }
 

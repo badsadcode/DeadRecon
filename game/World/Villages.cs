@@ -708,6 +708,17 @@ public partial class Villages : Node3D
 
         // A guard hut on one side, a watchtower on the other.
         var hutAt = c + side * (width / 2 + 7) - dir * 4;
+        // Their stores behind the hut: building supplies and ammunition, once.
+        var stores = Ground(hutAt - dir * 2.6f);
+        k.Box(_wood, new Vector3(.8f, .6f, .6f), new Transform3D(new Basis(Vector3.Up, yaw), stores + new Vector3(0, .3f, 0)));
+        k.Box(_sandbag, new Vector3(.7f, .5f, .5f), new Transform3D(new Basis(Vector3.Up, yaw + .3f), stores + new Vector3(0, .85f, 0)));
+        DeadRecon.Gear.Kit.AddLoot(stores, "Search their stores", kit =>
+        {
+            int got = 0;
+            for (int i = 0; i < 4; i++) if (kit.Add(DeadRecon.Gear.ItemDef.Supplies, 1, quiet: true)) got++;
+            kit.Add(DeadRecon.Gear.ItemDef.Mag20, 1, quiet: true);
+            return got > 0 ? $"Found {got} building supplies and a magazine" : "No room in your backpack";
+        }, key: $"checkpoint:{site.Index}");
         GroundHut(k, hutAt, yaw - MathF.PI / 2, 3.4f, 3, rng, _tin, _wood);
         Watchtower(k, c - side * (width / 2 + 6) + dir * 5, yaw);
     }

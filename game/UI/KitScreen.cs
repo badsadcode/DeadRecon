@@ -295,6 +295,18 @@ public partial class KitScreen : Control
                 if (Kit.Fit(item.Def.Slot, item) is { } why) Say(why); else Say($"Fitted: {item.Def.Name}");
                 break;
             case ItemKind.Magazine: Say(item.Rounds > 0 ? $"{item.Rounds} rounds. Press R in the field to load the fullest one." : "Empty."); break;
+            case ItemKind.Cargo when item.Def == ItemDef.FieldRadio:
+            {
+                var p = Player.GlobalPosition;
+                float yaw = Player.Rotation.Y;
+                var front = p - Player.GlobalTransform.Basis.Z * 2.5f;
+                if (DeadRecon.Base.HomeBase.Establish(front, yaw, World!) is { } notHere) { Say(notHere); break; }
+                Kit.Remove(item);
+                Close();
+                Hud.Announce("Home", "the radio is up. Press F at it.");
+                break;
+            }
+            case ItemKind.Cargo when item.Def == ItemDef.Supplies: Say("Build with these at your radio (F at home)."); break;
             default: Say("Keep that safe."); break;
         }
     }

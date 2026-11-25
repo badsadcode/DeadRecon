@@ -96,6 +96,27 @@ public partial class TreeScatter : Node3D
         public Color[] Tints = Array.Empty<Color>();
     }
 
+    public static TreeScatter? Current { get; private set; }
+
+    /// <summary>Clear trees from a circle now (home being set up): the cells it touches are replanted without them.</summary>
+    public void ClearArea(Vector2 centre, float radius)
+    {
+        Clearings.Add((centre, radius));
+        var drop = new List<(int, int)>();
+        foreach (var (key, cell) in _cells)
+        {
+            var min = new Vector2(key.Item1 * CellSize - World.Half, key.Item2 * CellSize - World.Half);
+            var nearest = new Vector2(Math.Clamp(centre.X, min.X, min.X + CellSize), Math.Clamp(centre.Y, min.Y, min.Y + CellSize));
+            if (nearest.DistanceTo(centre) > radius) continue;
+            foreach (var part in cell.Parts) part.Node.QueueFree();
+            foreach (var st in cell.Stumps) { Foliage.Remove((int)st.GetMeta("foliage")); st.QueueFree(); }
+            DeadRecon.World.Foliage.Remove(cell.Foliage);
+            drop.Add(key);
+        }
+        foreach (var key in drop) _cells.Remove(key);
+        _sinceUpdate = 1;
+    }
+
     private sealed class Cell
     {
         public int Lod = -1;
@@ -107,6 +128,7 @@ public partial class TreeScatter : Node3D
 
     public override void _Ready()
     {
+        Current = this;
         for (int v = 1; v <= 99; v++)
         {
             var lods = new ArrayMesh[LodUntil.Length];

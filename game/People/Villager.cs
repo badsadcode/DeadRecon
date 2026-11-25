@@ -37,6 +37,10 @@ public partial class Villager : CharacterBody3D, IDamageable
     /// <summary>Lost in the jungle (a job): sits tight and calls out until you find him (F), then follows you.</summary>
     public bool Lost;
     public bool Following { get; private set; }
+    /// <summary>What you say to get him to follow, his answer, and what he calls out (lost farmers by default).</summary>
+    public string FoundPrompt = "\"It's alright. Follow me.\"";
+    public string FoundLine = "Oh, thank goodness! I thought I'd be eaten! Lead the way, I'm right behind you.";
+    public string[]? Calls;
     private float _shout = 3;
     private bool _fWas;
 
@@ -371,16 +375,16 @@ public partial class Villager : CharacterBody3D, IDamageable
             if (dist < 75 && _shout <= 0)
             {
                 _shout = _rng.RandfRange(6, 10);
-                string[] calls = { "Hello?! Is someone there?!", "Over here! OVER HERE!", "Please don't be a tiger. Please don't be a tiger.", "Help! I'm by the big tree! ...They're all big trees!" };
+                string[] calls = Calls ?? new[] { "Hello?! Is someone there?!", "Over here! OVER HERE!", "Please don't be a tiger. Please don't be a tiger.", "Help! I'm by the big tree! ...They're all big trees!" };
                 Say(calls[_rng.RandiRange(0, calls.Length - 1)]);
             }
             if (dist < 3 && !Player.Dead)
             {
-                DeadRecon.UI.Hud.Prompt("F   \"It's alright. Follow me.\"");
+                DeadRecon.UI.Hud.Prompt($"F   {FoundPrompt}");
                 if (fPressed && Input.MouseMode == Input.MouseModeEnum.Captured)
                 {
                     Following = true;
-                    Say("Oh, thank goodness! I thought I'd be eaten! Lead the way, I'm right behind you.");
+                    Say(FoundLine);
                 }
             }
             _crouch = Mathf.MoveToward(_crouch, 1, dt * 3);

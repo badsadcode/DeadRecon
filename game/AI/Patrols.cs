@@ -241,6 +241,10 @@ public partial class Patrols : Node
         return p.Guards;
     }
 
+    /// <summary>Where the patrols are now (for radio rumours).</summary>
+    public IEnumerable<Vector3> PatrolPositions => _patrols.Select(p => Where(p) ?? Pos(p));
+    public IEnumerable<(Settlements.Site Site, bool Cleared)> Checkpoints => _garrisons.Values.Select(g => (g.Site, g.Cleared));
+
     /// <summary>The checkpoint's garrison, manned now if it hasn't been met yet (the headman's job).</summary>
     public IReadOnlyList<Guard> GarrisonOf(int site)
     {

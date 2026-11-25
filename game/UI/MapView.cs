@@ -160,6 +160,15 @@ public partial class MapView : Control
                 else DrawArc(p, 9, 0, MathF.Tau, 24, green, 3);
                 UiStyle.Text(this, p + new Vector2(job.MarkerRadius / _mpp + 8, -6), job.Title, 12, green, bold: board.Tracked == job);
             }
+        // Home.
+        if (DeadRecon.Base.HomeBase.Position is { } home)
+        {
+            var p = ToScreen(home.X, home.Z);
+            var green = new Color(.2f, .45f, .2f);
+            DrawColoredPolygon(new[] { p + new Vector2(0, -10), p + new Vector2(9, -2), p + new Vector2(6, 8), p + new Vector2(-6, 8), p + new Vector2(-9, -2) }, green);
+            DrawPolyline(new[] { p + new Vector2(0, -10), p + new Vector2(9, -2), p + new Vector2(6, 8), p + new Vector2(-6, 8), p + new Vector2(-9, -2), p + new Vector2(0, -10) }, ink, 1.5f);
+            UiStyle.Text(this, p + new Vector2(13, 5), "HOME", 13, green, bold: true);
+        }
         // Your waypoint.
         if (MapMemory.Current?.Waypoint is { } wp)
         {
