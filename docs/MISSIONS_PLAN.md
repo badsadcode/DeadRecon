@@ -276,7 +276,12 @@ Each step is playable on its own.
    villager from a Friendly or Loyal village comes (25). Guards lose track of a downed man who keeps quiet. The
    operation fails only when you bleed out (`Walker.Gone`): the hook for co-op's "all players down" rule.
    Not yet: the camp medic, squadmates smoking/suppressing before they come.
-4. **Ten new missions:**
+4. **Ten new missions:** **Built (2026-11-26)**, in `game/Mission/Mission.Ops.cs` (the table of kinds, places,
+   props, steps and words) with new steps in `Steps.cs` (photograph, listen, wait for, kill them all, hold out,
+   capture). Capture is physical: sneak up, F, he walks ahead of you and bolts if you look away (F to catch him).
+   Hold the village sends a real squad walking in, then a second when the first is in trouble; the last man breaks.
+   The radio offers any three. Simplified for now: capture uses a sneak-up, not morale (step 5); the trader has no
+   cart; the pilot's helicopter is heard, not seen.
    - photo recon
    - eavesdrop
    - radio mast

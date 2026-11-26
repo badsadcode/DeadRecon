@@ -28,7 +28,7 @@ public partial class Mission : Node3D
 {
     /// <summary>Intel = the main objective (whatever the kind), Extract = getting out (or setting up the radio).</summary>
     public enum Phase { Briefing, Intel, Extract, Complete, Failed }
-    public enum Op { None, Radio, Intel, Cache, Officer, Prisoner }
+    public enum Op { None, Radio, Intel, Cache, Officer, Prisoner, Recon, Eavesdrop, Mast, Fuel, Capture, Ambush, Pilot, Drop, Trader, Defend }
 
     public static Mission? Current { get; private set; }
     /// <summary>The operation the radio picked for the next time the jungle loads (kind, seed).</summary>
@@ -45,7 +45,7 @@ public partial class Mission : Node3D
     public event Action? Completed;
     public bool SkipBriefing;
     /// <summary>Spawns a guard (home, sentry) for reinforcements. Set by the scene.</summary>
-    public Func<Vector3, bool, Guard>? SpawnGuard;
+    public Func<Vector3, bool, Action<Guard>?, Guard>? SpawnGuard;
     /// <summary>The cage key (Prisoner ops): on the sentry. Picked up from his body.</summary>
     public bool HasKey { get; private set; }
     /// <summary>Intel ops: the intel has been sent from their radio (then come home).</summary>
@@ -63,7 +63,9 @@ public partial class Mission : Node3D
     public int Seed { get; private set; }
     /// <summary>Where the operation was planned from (the camp is picked around it): a saved operation needs it back.</summary>
     public Vector3 PlannedFrom { get; private set; }
-    private int _campGuards;
+    internal int _campGuards;
+    /// <summary>Someone you've taken alive (he walks ahead of you). Dead or escaped: the operation fails.</summary>
+    public Guard? Captive;
     private float _saveIn = 20;
     private bool _stepSave;
     private float _reinforceIn = -1;
@@ -72,6 +74,7 @@ public partial class Mission : Node3D
     public float StartHour = 9;
 
     public Op Kind { get; private set; } = Op.Intel;
+    /// <summary>The camp (or, away from a camp, the place it's all about: the road, the crash, the village).</summary>
     public Phase State { get; private set; } = Phase.Briefing;
     public string OperationName { get; private set; } = "";
     public string IntelName { get; private set; } = "";
@@ -119,14 +122,10 @@ public partial class Mission : Node3D
     public sealed record IntelDef(string Item, string Why);
     public static readonly string[] Prisoners = { "Sergeant Okafor", "Corporal Lindqvist", "Private Santos", "Lieutenant Mbeki", "Sergeant Kowalczyk", "Corporal Tran" };
 
-    public static string Describe(Op kind) => kind switch
-    {
-        Op.Radio => "Steal a radio", Op.Intel => "Steal intel", Op.Cache => "Blow up a supply cache",
-        Op.Officer => "Take out an officer", Op.Prisoner => "Rescue a prisoner", _ => "No operation",
-    };
+    public static string Describe(Op kind) => Info[kind].Name;
 
     /// <summary>Building supplies the operation pays.</summary>
-    public static int Reward(Op kind) => kind switch { Op.Radio => 3, Op.Intel => 5, Op.Cache => 7, Op.Officer => 6, Op.Prisoner => 8, _ => 0 };
+    public static int Reward(Op kind) => Info[kind].Pay;
 
     /// <summary>A name for an operation from its seed (the radio lists them before they're planned).</summary>
     public static string NameFor(int seed)
@@ -155,6 +154,7 @@ public partial class Mission : Node3D
         _prisonerName = prisoners[_rng.RandiRange(0, prisoners.Length - 1)];
         TreeScatter.Clearings.Clear();
         if (kind == Op.None) { State = Phase.Complete; GD.Print("[mission] at home: no operation"); return; }
+        if (!HasCamp(kind)) { PlanAway(spawn); return; }
 
         var home = HomeBase.Position;
         ExtractHome = home != null && kind != Op.Radio;
@@ -168,6 +168,8 @@ public partial class Mission : Node3D
         IntelAt = kind switch
         {
             Op.Cache => Ground(Camp + new Vector3(-5.5f, 0, -4), .4f),
+            Op.Fuel => Ground(Camp + new Vector3(-6.5f, 0, -4.5f)),
+            Op.Mast => Ground(Camp + new Vector3(-6, 0, 5.5f)),
             Op.Prisoner => Ground(Camp + new Vector3(4.5f, 0, -6.5f), 0),
             _ => _desk + new Vector3(.35f, .43f, 0),
         };
@@ -231,7 +233,7 @@ public partial class Mission : Node3D
         _treesAtStart = Trees.TreesFelled;
         if (Kind == Op.None) { _panelBack.Visible = false; return; }
 
-        BuildCamp();
+        if (HasCamp(Kind)) BuildCamp(); else BuildAway();
         if (!ExtractHome) BuildLandingZone();
         foreach (var step in Recipe()) { step.M = this; Steps.Add(step); }
         _campGuards = Guards.Count;
@@ -282,7 +284,7 @@ public partial class Mission : Node3D
                 };
                 yield return new Hold
                 {
-                    At = () => radioTop, What = "send it from their radio", Label = "RADIO", Seconds = 6, Doing = "sending",
+                    At = () => radioTop, What = "send it from their radio", Label = "RADIO", Seconds = 6, Verb = "sending",
                     Done = () =>
                     {
                         Transmitted = true; Loud = true;
@@ -296,7 +298,7 @@ public partial class Mission : Node3D
             case Op.Cache:
                 yield return new Hold
                 {
-                    At = () => IntelAt, What = "plant a charge on the supply cache", Label = "CACHE", Seconds = 3.5f, Doing = "setting the charge",
+                    At = () => IntelAt, What = "plant a charge on the supply cache", Label = "CACHE", Seconds = 3.5f, Verb = "setting the charge",
                     Done = () => { Hud("Charge set: 25 seconds. Walk away. Briskly."); GD.Print("[mission] charge planted"); },
                 };
                 yield return new Fuse
@@ -325,7 +327,7 @@ public partial class Mission : Node3D
                 };
                 yield return new Hold
                 {
-                    At = () => IntelAt, What = $"open the cage, free {_prisonerName}", Label = "CAGE", Seconds = 2.5f, Doing = "picking the lock",
+                    At = () => IntelAt, What = $"open the cage, free {_prisonerName}", Label = "CAGE", Seconds = 2.5f, Verb = "picking the lock",
                     Done = () =>
                     {
                         if (_cageDoor != null) _cageDoor.QueueFree();
@@ -351,6 +353,9 @@ public partial class Mission : Node3D
                 };
                 yield return new GetOut();
                 break;
+            default:
+                foreach (var step in MoreRecipe()) yield return step;
+                break;
         }
     }
 
@@ -359,6 +364,7 @@ public partial class Mission : Node3D
         SearchProgress = 0;
         if (Now is not { } step) return;
         step.Start();
+        step.OnStart?.Invoke();
         if (step.IsExtract && State == Phase.Intel) { State = Phase.Extract; ShowPanel(); }
     }
 
@@ -404,6 +410,7 @@ public partial class Mission : Node3D
             // Collision is the tent's own shape (a box round a prism left invisible walls beside the canvas).
             var tent = new PrismMesh { Size = new Vector3(3.2f, 2.0f, 4.2f) };
             var body = Prop(camp, tent, canvas, at, -a + MathF.PI / 2, Vector3.One);
+            _tents.Add(at);
             ((CollisionShape3D)body.GetChild(1)).Shape = tent.CreateConvexShape();
         }
         // Crates (searchable: building supplies, sometimes magazines).
@@ -417,6 +424,7 @@ public partial class Mission : Node3D
             if (_rng.Randf() < .5f) Prop(camp, new BoxMesh { Size = new Vector3(.7f, .7f, .7f) }, crate, at + Vector3.Up * .75f, _rng.Randf(), new Vector3(.7f, .7f, .7f));
             if (c == 0) lootAt = at;
         }
+        _lootPos = lootAt;
         if (lootAt != Vector3.Zero)
         {
             int supplies = _rng.RandiRange(2, 4);
@@ -490,9 +498,11 @@ public partial class Mission : Node3D
                 BuildCage(camp);
                 break;
         }
+        BuildCampExtras(camp);
 
         // Campfire: logs, flickering light, smoke.
         var fire = Ground(Camp + new Vector3(-2.5f, 0, 1.5f), .1f);
+        _firePos = fire;
         for (int l = 0; l < 4; l++)
         {
             var log = new MeshInstance3D { Mesh = new CylinderMesh { TopRadius = .07f, BottomRadius = .07f, Height = .9f }, MaterialOverride = Mat(.18f, .12f, .08f) };
@@ -557,7 +567,7 @@ public partial class Mission : Node3D
         _prisoner.GlobalPosition = Ground(c, .3f);
     }
 
-    private OmniLight3D _fireLight = null!;
+    private OmniLight3D? _fireLight;
 
     private void BuildLandingZone()
     {
@@ -623,13 +633,15 @@ public partial class Mission : Node3D
     {
         if (Kind == Op.None) { _marker.Visible = false; return; }
         float dt = (float)delta;
-        _fireLight.LightEnergy = 2f + MathF.Sin((float)Time.GetTicksMsec() * .013f) * .3f + MathF.Sin((float)Time.GetTicksMsec() * .031f) * .2f;
+        if (_fireLight != null) _fireLight.LightEnergy = 2f + MathF.Sin((float)Time.GetTicksMsec() * .013f) * .3f + MathF.Sin((float)Time.GetTicksMsec() * .031f) * .2f;
         if (State is Phase.Intel or Phase.Extract) { Elapsed += delta; Reinforce(dt); AutoSave(dt); }
 
         if (Now is { } step)
         {
             foreach (var (v, name) in Escorts)
                 if (!IsInstanceValid(v) || v.IsDead) { Fail($"{(v == _prisoner ? _prisonerName : name)} didn't make it."); break; }
+            if (Captive != null && (!IsInstanceValid(Captive) || Captive.State == Guard.Mood.Dead)) Fail("Your prisoner didn't make it. He was worth more alive.");
+            else if (Captive is { Escaped: true }) Fail("He got away. Somewhere out there, a very relieved officer.");
             if (Now == step && step.Tick(dt)) NextStep();
         }
 
@@ -655,10 +667,11 @@ public partial class Mission : Node3D
     private void Reinforce(float dt)
     {
         if (_reinforced || SpawnGuard == null) return;
+        if (_commsCut && _reinforceIn < 0) return;   // their mast is down: nobody to call
         if (_reinforceIn < 0)
         {
             bool alarm = Guards.Exists(g => g.TimesAlerted > 0) || Loud;
-            if (alarm) { _reinforceIn = Transmitted ? 35 : _rng.RandfRange(45, 75); GD.Print($"[mission] alarm: reinforcements in {_reinforceIn:0} s"); }
+            if (alarm) { _reinforceIn = Transmitted ? 35 : _bang > 1 ? 25 : _rng.RandfRange(45, 75); GD.Print($"[mission] alarm: reinforcements in {_reinforceIn:0} s"); }
             return;
         }
         _reinforceIn -= dt;
@@ -668,11 +681,11 @@ public partial class Mission : Node3D
         var dir = HomeBase.Position is { } home ? (Camp - home) with { Y = 0 } : new Vector3(_rng.RandfRange(-1, 1), 0, _rng.RandfRange(-1, 1));
         if (dir.LengthSquared() < .01f) dir = Vector3.Forward;
         var from = Camp + dir.Normalized() * 230;
-        int n = 3 + (DeadRecon.UI.Settings.Difficulty == DeadRecon.UI.Settings.Level.Veteran ? 1 : 0);
+        int n = 3 + (DeadRecon.UI.Settings.Difficulty == DeadRecon.UI.Settings.Level.Veteran ? 1 : 0) + (_bang > 1 ? 2 : 0);
         for (int k = 0; k < n; k++)
         {
             var at = from + new Vector3(k * 2.5f, 0, k * 1.5f);
-            var g = SpawnGuard(at, false);
+            var g = SpawnGuard(at, false, null);
             g.Respond(Player.Dead ? Camp : Player.GlobalPosition);
             Guards.Add(g);
             Reinforcements++;
@@ -688,13 +701,13 @@ public partial class Mission : Node3D
         var at = IntelAt;
         foreach (var n in _cache) if (IsInstanceValid(n)) n.QueueFree();
         _cache.Clear();
-        var flash = new OmniLight3D { LightColor = new Color(1, .7f, .35f), LightEnergy = 16, OmniRange = 40 };
+        var flash = new OmniLight3D { LightColor = new Color(1, .7f, .35f), LightEnergy = 16 * _bang, OmniRange = 40 * _bang };
         AddChild(flash);
         flash.GlobalPosition = at + Vector3.Up * 2;
         var tween = CreateTween();
         tween.TweenProperty(flash, "light_energy", 0f, .9f);
         tween.TweenCallback(Callable.From(flash.QueueFree));
-        AddChild(Smoke(at + Vector3.Up, new Color(.18f, .17f, .16f, .7f), 4.5f));
+        AddChild(Smoke(at + Vector3.Up, new Color(.18f, .17f, .16f, .7f), 4.5f * _bang));
         var fireball = new CpuParticles3D
         {
             OneShot = true, Explosiveness = .95f, Amount = 60, Lifetime = 1.2f, Direction = Vector3.Up, Spread = 70, InitialVelocityMin = 5, InitialVelocityMax = 14,
@@ -713,10 +726,11 @@ public partial class Mission : Node3D
         boom.GlobalPosition = at;
         boom.Play();
         foreach (var g in Guard.All)
-            if (g.State != Guard.Mood.Dead && g.GlobalPosition.DistanceTo(at) < 12) g.TakeHit(400, g.GlobalPosition + Vector3.Up, at);
-        if (Player.GlobalPosition.DistanceTo(at) < 10) Player.TakeHit(Player.GlobalPosition.DistanceTo(at) < 5 ? 200 : 60, Player.GlobalPosition, at);
-        DeadRecon.Combat.Hearing.Make(at, 600, this);
-        Hud("The cache is gone. Spectacularly.");
+            if (g.State != Guard.Mood.Dead && g.GlobalPosition.DistanceTo(at) < 12 * _bang) g.TakeHit(400, g.GlobalPosition + Vector3.Up, at);
+        float you = Player.GlobalPosition.DistanceTo(at);
+        if (you < 10 * _bang) Player.TakeHit(you < 5 * _bang ? 200 : 60, Player.GlobalPosition, at);
+        DeadRecon.Combat.Hearing.Make(at, _bang > 1 ? 1500 : 600, this);
+        Hud(Kind switch { Op.Fuel => "The fuel dump goes up in a fireball you can feel in your teeth. The whole valley heard that.", Op.Mast => "The charge goes off at the foot of the mast...", _ => "The cache is gone. Spectacularly." });
         GD.Print("[mission] cache destroyed");
     }
 
@@ -727,6 +741,7 @@ public partial class Mission : Node3D
         GD.Print($"[mission] complete in {Elapsed:0} s");
         Completed?.Invoke();
         Kit.Current?.RemoveIntel();   // handed over
+        Bonuses();
         if (Kind == Op.Prisoner && _prisoner != null && IsInstanceValid(_prisoner))
         {
             _prisoner.Say(ExtractHome ? "Home sweet... tarp. I'll take it. Thank you. I'll be by the fire." : "My ride! Thank you. Drinks are on me. Well, on HQ.");
@@ -820,7 +835,11 @@ public partial class Mission : Node3D
     public void Resume(OperationSave s)
     {
         StepIndex = Math.Clamp(s.Step, 0, Steps.Count - 1);
-        for (int i = 0; i < StepIndex; i++) Steps[i].Replay?.Invoke();
+        for (int i = 0; i < StepIndex; i++)
+        {
+            Steps[i].Replay?.Invoke();
+            if (!HasCamp(Kind)) Steps[i].OnStart?.Invoke();   // their patrol, search party, attackers set off again
+        }
         Elapsed = s.Elapsed;
         _reinforced = s.Reinforced; Loud = s.Loud;
         if (_reinforced) _reinforceIn = 0;
@@ -868,7 +887,7 @@ public partial class Mission : Node3D
         var target = Target ?? Camp;
         var d = target - Player.GlobalPosition;
         string dir = Compass(d);
-        string hold = SearchProgress > 0 && Now is Hold hs ? $"   {hs.Doing}... {SearchProgress * 100:0}%"
+        string hold = SearchProgress > 0 && Now?.Doing is { } doing ? $"   {doing}... {Math.Min(1, SearchProgress) * 100:0}%"
                     : NearIntel ? "   hold F" : "";
         return State switch
         {
@@ -898,21 +917,13 @@ public partial class Mission : Node3D
         {
             float campDist = Player.GlobalPosition.DistanceTo(Camp);
             string where = $"a small enemy camp, about {campDist:0} m {Compass(Camp - Player.GlobalPosition)} of you";
-            string job = Kind switch
-            {
-                Op.Radio => $"You're on your own out here, with no way to call anyone. There's {where}, and they have a field radio on a desk. " +
-                            "Take it. Then find a quiet spot, well away from them, and set it up (Tab, right-click the radio). That's home.",
-                Op.Cache => $"Their supply cache at {where}: ammunition, fuel, canned peaches. Plant a charge on it (hold F), then be somewhere else when it goes.",
-                Op.Officer => $"An officer is visiting {where}. Mostly to shout at people. He's the one by the radio desk. He doesn't leave.",
-                Op.Prisoner => $"{_prisonerName} was taken two days ago and is being kept in a bamboo cage at {where}. Pick the lock (hold F) and bring him out.",
-                _ => $"Take {IntelName} from the radio desk at {where}. {_why}",
-            };
+            string job = BriefingJob(where);
             string after = Kind == Op.Radio ? "" : ExtractHome ? "Then come home.\n\n" : "Then get to the landing zone. Look for the green smoke.\n\n";
             _panel.Text =
                 $"{OperationName.ToUpper()}   ·   {Describe(Kind).ToUpper()}\n\n{job}\n\n{after}" +
                 $"Insertion at {(int)StartHour:00}:{(int)(StartHour % 1 * 60):00} ({TimeOfDay.Describe(StartHour)}). " +
                 (StartHour < 5.5f || StartHour > 19.3f ? "It's dark: they won't see you far, but you won't see much either. " : "") +
-                $"{Guards.Count} guards, reportedly all in a bad mood.   Pay: {Reward(Kind)} building supplies.\n\n" +
+                (HasCamp(Kind) ? $"{Guards.Count} guards, reportedly all in a bad mood.   " : "") + $"Pay: {Reward(Kind)} building supplies.\n\n" +
                 "Tip: crouch (hold C, or Alt to toggle) in the ferns. Rain covers your footsteps.\n\n" +
                 "Press any key to begin.";
         }
@@ -924,12 +935,7 @@ public partial class Mission : Node3D
             string verdict = alerts == 0 ? "Nobody even knew you were there. Ghost." :
                              down == Guards.Count ? "Loud, but effective. The paperwork will be enormous." :
                              "Messy. You were spotted, but you got it done.";
-            string done = Kind switch
-            {
-                Op.Radio => "The radio's up. It crackles. That's home now: operations, news and gossip come through it, and you can build here.",
-                Op.Cache => "Their cache is a smoking hole.", Op.Officer => "The officer won't be shouting at anyone any more.",
-                Op.Prisoner => $"{_prisonerName} is safe.", _ => $"You got {IntelName} out.",
-            };
+            string done = DoneText();
             _panel.Text =
                 $"{OperationName.ToUpper()}: COMPLETE\n\n{done}\n\n" +
                 $"Time: {(int)Elapsed / 60}:{(int)Elapsed % 60:00}    Shots fired: {Rifle.ShotsFired}    Guards down: {down}/{Guards.Count}\n" +

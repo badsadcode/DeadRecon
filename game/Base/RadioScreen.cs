@@ -68,7 +68,8 @@ public partial class RadioScreen : Control
     {
         int done = HomeBase.Saved?.Operations ?? 0;
         var rng = new RandomNumberGenerator { Seed = (ulong)(done * 7919 + (int)(HomeBase.Saved?.X ?? 0) * 13 + 101) };
-        var kinds = new List<Mission.Op> { Mission.Op.Intel, Mission.Op.Cache, Mission.Op.Officer, Mission.Op.Prisoner };
+        // Every kind except the first-day radio job (and "none"); three different ones each time.
+        var kinds = Mission.Info.Keys.Where(k => k is not (Mission.Op.None or Mission.Op.Radio)).ToList();
         var list = new List<(Mission.Op, int)>();
         for (int k = 0; k < 3; k++)
         {
@@ -164,17 +165,11 @@ public partial class RadioScreen : Control
             DrawRect(new Rect2(r.Position, new Vector2(r.Size.X, 3)), new Color(UiStyle.Amber, .7f));
             UiStyle.Text(this, r.Position + new Vector2(24, 48), Mission.NameFor(seed).ToUpper(), 20, UiStyle.Ink, bold: true);
             UiStyle.Text(this, r.Position + new Vector2(24, 78), Mission.Describe(kind).ToUpper(), 14, UiStyle.Amber, bold: true);
-            string blurb = kind switch
-            {
-                Mission.Op.Cache => "Their supply cache: ammunition, fuel, canned peaches. Plant a charge on it, then be elsewhere when it goes up. Loud. Very satisfying.",
-                Mission.Op.Officer => "An officer is visiting one of their camps, mostly to shout at people. He sits by the radio desk. He doesn't get to leave.",
-                Mission.Op.Prisoner => "One of ours is in a bamboo cage at their camp. Pick the lock, then bring him home. He walks slower than you. He also complains.",
-                _ => "Their camp has something on the radio desk we'd love to read. Codebooks, schedules, peach orders. Take it and come home.",
-            };
+            string blurb = Mission.Info[kind].Blurb;
             DrawMultilineString(UiStyle.Font, r.Position + new Vector2(24, 120), blurb, HorizontalAlignment.Left, r.Size.X - 48, 16, -1, UiStyle.Ink);
             float hour = TimeOfDay.StartHourFor(seed);
             UiStyle.Text(this, r.Position + new Vector2(24, 300), $"SETS OFF   {(int)hour:00}:{(int)(hour % 1 * 60):00}  ({TimeOfDay.Describe(hour)})", 14, UiStyle.Dim);
-            UiStyle.Text(this, r.Position + new Vector2(24, 326), "WHERE      a camp 300-600 m from home", 14, UiStyle.Dim);
+            UiStyle.Text(this, r.Position + new Vector2(24, 326), $"WHERE      {Mission.Info[kind].Where}", 14, UiStyle.Dim);
             UiStyle.Text(this, r.Position + new Vector2(24, 352), $"PAY        {Mission.Reward(kind)} building supplies", 14, UiStyle.Dim);
             var (k2, s2) = (kind, seed);
             Button(new Rect2(r.Position + new Vector2(24, r.Size.Y - 70), new Vector2(r.Size.X - 48, 46)), "TAKE THIS ONE", () => { Close(); StartOperation(k2, s2); }, primary: true);

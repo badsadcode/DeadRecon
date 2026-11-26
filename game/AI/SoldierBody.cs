@@ -30,6 +30,8 @@ public partial class SoldierBody : Node3D
     public float Crouch { get; set; }
     public Node3D? Muzzle { get; private set; }
     public bool Loaded { get; private set; }
+    /// <summary>Hands up: the gun's gone (a captive).</summary>
+    public bool GunVisible { set { if (_gun != null && IsInstanceValid(_gun)) _gun.Visible = value; } }
 
     private Skeleton3D _skel = null!;
     private AnimationPlayer? _anim;

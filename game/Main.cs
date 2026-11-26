@@ -201,11 +201,11 @@ public partial class Main : Node3D
 			_mission.Guards.Add(g);
 			return g;
 		}
-		if (op != Mission.Op.None)
+		if (Mission.HasCamp(op))
 		{
 		_guard = AddGuard(_mission.Camp + new Vector3(0, 0, -2), sentry: false);
 		var sentryGuard = AddGuard(_mission.Desk + new Vector3(-.8f, 0, 1.6f), sentry: true);
-		if (op == Mission.Op.Officer) _mission.Officer = sentryGuard;
+		if (op is Mission.Op.Officer or Mission.Op.Capture) _mission.Officer = sentryGuard;
 		if (op == Mission.Op.Prisoner) _mission.KeyHolder = sentryGuard;
 		// Bigger camps than before: a second patroller always, and a pair roving round the edge.
 		var g2 = AddGuard(_mission.Camp + new Vector3(4, 0, 5), sentry: false);
@@ -229,10 +229,11 @@ public partial class Main : Node3D
 			g.PatrolMin = 24; g.PatrolMax = 38;
 		}
 		}
-		_mission.SpawnGuard = (home, sentry) =>
+		_mission.SpawnGuard = (home, sentry, setup) =>
 		{
 			home.Y = _world.HeightAt(home.X, home.Z) + .2f;
 			var g = new Guard { WeaponId = DeadRecon.Gear.WeaponDef.ForGuard(new RandomNumberGenerator { Seed = (ulong)(home.X * 31 + home.Z * 17) }).Id, Target = _walker, Terrain = _terrain, World = _world, Home = _mission.Camp, Sentry = false, PatrolMin = 10, PatrolMax = 25 };
+			setup?.Invoke(g);
 			AddChild(g);
 			g.GlobalPosition = home;
 			_guards.Add(g);
@@ -1457,22 +1458,29 @@ public partial class Main : Node3D
 		await Seconds(1.5);
 		GD.Print($"[op] after the objective: {_mission.State}; {_mission.Objective()}");
 		await Shot("2_after");
-		if (_mission.Kind == Mission.Op.Prisoner && _mission.Prisoner is { } pr)
+		// Anyone to talk into following you (prisoner, pilot, trader): walk up, F, then carry on.
+		for (int guard = 0; guard < 4 && _mission.Now is Mission.Talk talk && talk.Who() is { } who; guard++)
 		{
 			_walker.SetFlying(false);
-			_walker.GlobalPosition = pr.GlobalPosition + new Vector3(0, .5f, 2.4f);
+			_walker.GlobalPosition = who.GlobalPosition + new Vector3(0, .5f, 2.4f);
+			for (int f = 0; f < 600 && !_terrain.HasCollisionAt(_walker.GlobalPosition); f++) await Frames(1);
 			await Seconds(1.5);
-			LookAt(pr.GlobalPosition + Vector3.Up);
-			await Shot("3_prisoner");
+			LookAt(who.GlobalPosition + Vector3.Up);
+			await Shot("3_talk");
 			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = true });
 			await Frames(3);
 			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = false });
 			await Seconds(1);
-			GD.Print($"[op] prisoner following: {pr.Following}; {_mission.State}");
+			GD.Print($"[op] {who.Name} following: {who.Following}; {_mission.State}; {_mission.Objective()}");
+			_mission.TestTakeIntel();
 		}
+		GD.Print($"[op] before the way out: {_mission.State}; {_mission.Objective()}");
 		_walker.SetFlying(false);
 		var ex = _mission.Extraction;
 		_walker.GlobalPosition = ex with { Y = _world.HeightAt(ex.X, ex.Z) + .5f };
+		// Your company comes with you (escorts behind, a captive in front).
+		foreach (var (v, _) in _mission.Escorts) if (IsInstanceValid(v)) v.GlobalPosition = _walker.GlobalPosition + new Vector3(1.5f, 0, 2);
+		if (_mission.Captive is { } cap && IsInstanceValid(cap)) cap.GlobalPosition = _walker.GlobalPosition + new Vector3(0, 0, -3);
 		for (int f = 0; f < 900 && !_terrain.HasCollisionAt(ex); f++) await Frames(1);
 		await Seconds(4);
 		GD.Print($"[op] at the way out: {_mission.State}; supplies {_kit.AllItems.Where(i => i.Def == DeadRecon.Gear.ItemDef.Supplies).Sum(i => i.Count)}");
@@ -2689,7 +2697,7 @@ public partial class Main : Node3D
 	private string CoverStatus()
 	{
 		var _guard = NearestGuard();
-		if (_guard.State == Guard.Mood.Dead) return "cover: nobody left to hide from";
+		if (_guard == null || _guard.State == Guard.Mood.Dead) return "cover: nobody left to hide from";
 		var eye = _guard.GlobalPosition + Vector3.Up * 1.6f;
 		if (eye.DistanceTo(_walker.GlobalPosition) > 90) return "cover: out of his sight range";
 		float through = Math.Max(Foliage.Transmission(eye, _walker.Chest), Foliage.Transmission(eye, _walker.Camera.GlobalPosition) * .7f);
@@ -2697,9 +2705,11 @@ public partial class Main : Node3D
 		return $"cover from plants: {(1 - through) * 100:0}%   {sees}";
 	}
 
-	private Guard NearestGuard()
+	/// <summary>The nearest living guard (null: nobody around, e.g. an operation away from any camp).</summary>
+	private Guard? NearestGuard()
 	{
-		Guard best = _guard; float bd = float.MaxValue;
+		_guards.RemoveAll(g => !IsInstanceValid(g));
+		Guard? best = _guard != null && IsInstanceValid(_guard) ? _guard : null; float bd = float.MaxValue;
 		foreach (var g in _guards)
 		{
 			float d = g.GlobalPosition.DistanceTo(_walker.GlobalPosition) + (g.State == Guard.Mood.Dead ? 1e6f : 0);
@@ -2711,6 +2721,7 @@ public partial class Main : Node3D
 	private string GuardStatus()
 	{
 		var _guard = NearestGuard();
+		if (_guard == null) return "nobody around";
 		float d = _guard.GlobalPosition.DistanceTo(_walker.GlobalPosition);
 		string mood = _guard.State switch
 		{

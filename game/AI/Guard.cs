@@ -19,7 +19,7 @@ namespace DeadRecon.AI;
 /// </summary>
 public partial class Guard : CharacterBody3D, IDamageable
 {
-    public enum Mood { Patrol, Suspicious, Investigate, Alert, Search, Dead }
+    public enum Mood { Patrol, Suspicious, Investigate, Alert, Search, Dead, Captive }
 
     public Walker Target = null!;
     public TerrainStreamer Terrain = null!;
@@ -183,6 +183,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         UpdateFlash(dt);
         if (State == Mood.Dead) { Fall(dt); return; }
         if (!Terrain.HasCollisionAt(GlobalPosition)) return; // no ground loaded under him yet: stand still (far from the player)
+        if (State == Mood.Captive) { CaptiveTick(dt); return; }
 
         _stateTime += dt;
         Perceive(dt);
@@ -592,6 +593,67 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     /// <summary>Reinforcements: run to the trouble.</summary>
     public void Respond(Vector3 where) => HearAlarm(where);
+
+    // ================================================================= captured (docs/MISSIONS_PLAN.md: capture is physical)
+
+    public bool Captive => State == Mood.Captive;
+    /// <summary>A captive who's legging it.</summary>
+    public bool Bolting { get; private set; }
+    /// <summary>A captive who got clean away.</summary>
+    public bool Escaped { get; private set; }
+    private float _unwatched;
+    private bool _fWasCaptive;
+
+    /// <summary>Hands up: no gun, no fight. He walks a few metres ahead of you; look away too long and he runs.</summary>
+    public void Surrender()
+    {
+        if (State == Mood.Dead) return;
+        State = Mood.Captive;
+        Bolting = false; Escaped = false; _unwatched = 0;
+        if (_body != null) _body.GunVisible = false;
+        if (_gunPivot != null) _gunPivot.Visible = false;
+        string[] lines = { "Alright! Alright! Don't shoot!", "...I surrender. Please don't tell my mother.", "Hands up. See? Hands. Up." };
+        Say(lines[(int)(Looks.Randi() % (uint)lines.Length)]);
+        GD.Print($"[guard] {Name} surrendered");
+    }
+
+    private void CaptiveTick(float dt)
+    {
+        var p = Target.GlobalPosition;
+        var flat = (GlobalPosition - p) with { Y = 0 };
+        float d = flat.Length();
+        bool f = Input.IsPhysicalKeyPressed(Key.F) && Input.MouseMode == Input.MouseModeEnum.Captured, fPressed = f && !_fWasCaptive;
+        _fWasCaptive = f;
+        if (Bolting)
+        {
+            if (d > 45) { Escaped = true; return; }
+            if (d < 2.5f && !Target.Dead)
+            {
+                DeadRecon.UI.Hud.Prompt("F   \"Get back here.\"");
+                if (fPressed) { Bolting = false; _unwatched = 0; Say("Alright! I was... stretching my legs."); return; }
+            }
+            var away = d > .1f ? flat / d : Vector3.Forward;
+            Move(GlobalPosition + away * 10, 4.6f, null, dt);
+            return;
+        }
+        // Is he being watched? (Your view, roughly toward him, and not too far.)
+        var cam = Target.Camera.GlobalTransform;
+        var to = (GlobalPosition + Vector3.Up * 1.2f - cam.Origin).Normalized();
+        bool watched = !Target.Dead && -cam.Basis.Z.Dot(to) > .75f && d < 25;
+        _unwatched = watched ? 0 : _unwatched + dt;
+        if ((_unwatched > 6 && d > 4) || d > 18 || Target.Dead)
+        {
+            Bolting = true;
+            Say("...!");
+            GD.Print($"[guard] captive {Name} bolted");
+            return;
+        }
+        // Walk ahead of you, where you can see him.
+        var fwd = -Target.GlobalTransform.Basis.Z with { Y = 0 };
+        var goal = p + (fwd.LengthSquared() > .01f ? fwd.Normalized() : Vector3.Forward) * 3.5f;
+        float gd = new Vector2(goal.X - GlobalPosition.X, goal.Z - GlobalPosition.Z).Length();
+        Move(goal, gd > 4 ? 3.2f : gd > .8f ? 1.5f : 0, gd > .8f ? goal : p, dt);
+    }
 
     private void HearAlarm(Vector3 where)
     {
