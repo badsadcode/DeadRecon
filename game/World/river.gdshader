@@ -291,7 +291,9 @@ void fragment() {
 	// downhill, not a mirror-smooth chrome slide.
 	float fall_glow = 0.0;
 	vec3 gn = normalize(cross(dFdx(v_world), dFdy(v_world)));
-	float steep = smoothstep(0.3, 0.65, 1.0 - abs(gn.y));
+	// (Not the ribbon's edge strip, which dips steeply under the bank: it was read as a fall and glowed as a line
+	// along every shore. Only well inside the water.)
+	float steep = smoothstep(0.3, 0.65, 1.0 - abs(gn.y)) * smoothstep(-0.2, -1.0, shore);
 	if (steep > 0.001) {
 		vec2 side = normalize(vec2(-gn.z, gn.x) + vec2(1e-5));
 		// Long vertical streaks (stretched along the fall), sliding down fast.
@@ -304,7 +306,9 @@ void fragment() {
 	}
 
 	// ------------------------------------------------------------- compose
-	float refl_w = fresnel;
+	// Water only a few centimetres thick (the very edge) doesn't mirror the sky: at a grazing angle that sliver
+	// glowed as a bright line along the shore (Tom's dumps).
+	float refl_w = fresnel * smoothstep(0.02, 0.25, thickness);
 	vec3 body = scatter_color * scatter_amt;
 	// Cloud shadows drift over the water too (they darken the lit body and the glint, not what's beneath).
 	vec2 cp = (xz + cloud_shift) * 0.0016;
@@ -318,7 +322,9 @@ void fragment() {
 	METALLIC = 0.0;
 	ALPHA = clamp(thickness * 6.0, 0.0, 1.0);
 	// From below (wading in deep water, eyes under): a dim olive ceiling with a brighter window above.
-	if (!FRONT_FACING) {
+	// (Only when the eye really is under the water. The ribbon's edge dips under the bank, and from across the river
+	// a sliver of its underside showed: it lit up in this colour as a line along the far shore.)
+	if (!FRONT_FACING && (INV_VIEW_MATRIX * vec4(0.0, 0.0, 0.0, 1.0)).y < v_world.y) {
 		float up_k = clamp(dot(-n_view, vdir), 0.0, 1.0);
 		float window = smoothstep(0.55, 0.8, up_k);
 		ALBEDO = vec3(0.0);

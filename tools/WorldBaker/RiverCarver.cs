@@ -134,14 +134,14 @@ static class RiverCarver
                 if (dist < hw)
                 {
                     float u = dist / hw;
-                    h = sf - .05f - depth * MathF.Pow(1 - u * u, .8f);       // River's rounded bed
+                    h = sf - .02f - depth * MathF.Pow(1 - u * u, .8f);       // River's rounded bed
                     wet[k] = true; level[k] = sf;
                     Interlocked.Increment(ref water);
                 }
                 else
                 {
                     float e = dist - hw;
-                    float bankTop = sf - .05f + .55f * Smooth01(e / Bank);
+                    float bankTop = sf - .02f + .52f * Smooth01(e / Bank);
                     if (e <= Bank) h = bankTop;
                     else
                     {

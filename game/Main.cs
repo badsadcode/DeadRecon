@@ -1210,6 +1210,29 @@ public partial class Main : Node3D
 			bank = w - across * 8; bank.Y = _world.HeightAt(bank.X, bank.Z);
 		}
 		var along = new Vector3(-across.Z, 0, across.X);
+		// --fromdump=<dir1;dir2>: Tom's F9 dumps, from exactly where he stood, looking where he looked, at his hour.
+		string dumps = OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--fromdump="))?.Split("=", 2)[1] ?? "";
+		if (dumps != "")
+		{
+			int k = 0;
+			foreach (var d in dumps.Split(';'))
+			{
+				using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(Path.Combine(d, "info.json")));
+				var r = doc.RootElement;
+				Vector3 V(string key) { var a = r.GetProperty(key); return new Vector3(a[0].GetSingle(), a[1].GetSingle(), a[2].GetSingle()); }
+				var eye = V("camera"); var look = V("looking");
+				_walker.SetFlying(true);
+				_walker.GlobalPosition = eye;
+				_time.Hour = r.GetProperty("hour").GetSingle();
+				for (int f = 0; f < 2400 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(eye)); f++) await Frames(1);
+				await Seconds(2.5);
+				Frame(eye, eye + look * 10);
+				cam.Fov = r.GetProperty("fov").GetSingle();
+				await Shot($"dump_{k++}");
+			}
+			GetTree().Quit();
+			return;
+		}
 		Frame(bank + Vector3.Up * 2.2f - across * 2, w + along * 25 + across * 4);
 		await Shot("1_bank_morning");
 		Frame(w with { Y = w.Y + .9f } - across * 3, w + along * 40 + Vector3.Down * .5f);

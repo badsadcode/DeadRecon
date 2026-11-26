@@ -80,7 +80,8 @@ public partial class RiverRibbons : Node3D
                 var flow = tan * speed;
                 float shore = Math.Abs(o) * hw - hw;                                    // m, negative in the water
                 var p = new Vector2(l.X[i], l.Z[i]) + side * (o * hw);
-                float y = l.S[i] - (Math.Abs(o) > 1 ? .3f : 0);
+                // The edge row sits under the bank (which starts at the waterline): no sliver of water above it.
+                float y = l.S[i] - (Math.Abs(o) > 1 ? .45f : Math.Abs(o) >= 1 ? .08f : 0);
                 m.Add(new Vector3(p.X, y, p.Y), Vector3.Up, new Color(flow.X / 6 + .5f, flow.Y / 6 + .5f, d / 8, foam), new Vector2(shore, 0));
             }
         }

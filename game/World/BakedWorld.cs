@@ -49,8 +49,8 @@ public sealed class BakedWorld
             w._height[tz * w.TilesPerSide + tx] = ReadTile(Path.Combine(dir, "tiles", $"h_{tx}_{tz}.r16"), w.TileSamples);
             w._water[tz * w.TilesPerSide + tx] = ReadTile(Path.Combine(dir, "tiles", $"w_{tx}_{tz}.r16"), w.TileSamples);
         }
-        w.FillWaterHoles();
         w.MarkRivers(RiverRibbons.Load(dir));
+        w.FillWaterHoles();
         return w;
     }
 
@@ -72,6 +72,9 @@ public sealed class BakedWorld
                 for (int gx = 1; gx < n - 1; gx++)
                 {
                     if (Raw(_water, gx, gz) != 0) continue;
+                    // Not beside the carved rivers: their banks start at the waterline, and flooding them doubled the
+                    // river's width with flat sheets (Tom's dump, 26 Nov). Lakes and pools only.
+                    if (_nearRiver.Length > 0 && _nearRiver[gz * n + gx]) continue;
                     ushort ground = Raw(_height, gx, gz), best = 0;
                     for (int k = 0; k < 4; k++)
                     {
@@ -87,7 +90,7 @@ public sealed class BakedWorld
         Godot.GD.Print($"[world] filled {filled} holes in the rivers ({clock.ElapsedMilliseconds} ms)");
     }
 
-    private bool[] _river = Array.Empty<bool>();
+    private bool[] _river = Array.Empty<bool>(), _nearRiver = Array.Empty<bool>();
 
     /// <summary>Samples a river ribbon covers (RiverRibbons draws their water; the grid water leaves them out).</summary>
     public bool IsRiver(int gx, int gz)
@@ -101,19 +104,22 @@ public sealed class BakedWorld
         if (lines.Count == 0) return;
         int n = SamplesPerSide;
         _river = new bool[n * n];
+        _nearRiver = new bool[n * n];
         foreach (var l in lines)
             for (int i = 0; i < l.X.Length; i++)
             {
-                float r = l.W[i] / 2 + 2.5f;
+                float r = l.W[i] / 2 + 2.5f, near = l.W[i] / 2 + 20;
                 var (fx, fz) = ToSample(l.X[i], l.Z[i]);
-                int rr = (int)MathF.Ceiling(r / Spacing);
+                int rr = (int)MathF.Ceiling(near / Spacing);
                 for (int dz = -rr; dz <= rr; dz++)
                 for (int dx = -rr; dx <= rr; dx++)
                 {
                     int gx = (int)MathF.Round(fx) + dx, gz = (int)MathF.Round(fz) + dz;
                     if (gx < 0 || gz < 0 || gx >= n || gz >= n) continue;
                     float wx = SampleToWorld(gx) - l.X[i], wz = SampleToWorld(gz) - l.Z[i];
-                    if (wx * wx + wz * wz <= r * r) _river[gz * n + gx] = true;
+                    float d2 = wx * wx + wz * wz;
+                    if (d2 <= near * near) _nearRiver[gz * n + gx] = true;
+                    if (d2 <= r * r) _river[gz * n + gx] = true;
                 }
             }
     }
