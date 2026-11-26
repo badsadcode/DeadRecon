@@ -148,14 +148,28 @@ public static class Synth
             }
             default:
             {
-                // Water: a splash (bright noise) with a gurgling tail.
-                var hp = Biquad.HighPass(900); var bp = Biquad.BandPass(650, 2);
+                // Wading: water pushed aside, a swish that swells and fades (no sharp start: the old splash began
+                // with a full-volume crack of bright noise and sounded like gunfire, Tom), and a few bubbles.
+                var swish = Biquad.BandPass(650 + rng.Next(350), .8f);
+                var low = Biquad.LowPass(380);
+                var bubbles = new List<(int At, int Len, float F0, float F1)>();
+                for (int k = 0; k < 4 + rng.Next(5); k++)
+                    bubbles.Add(((int)(Rate * (.04 + rng.NextDouble() * .22)), (int)(Rate * (.015 + rng.NextDouble() * .03)), 320 + rng.Next(400), 700 + rng.Next(700)));
                 for (int i = 0; i < n; i++)
                 {
                     float t = i / (float)Rate, noise = (float)rng.NextDouble() * 2 - 1;
-                    s[i] = hp.Run(noise) * MathF.Exp(-t * 20) + bp.Run(noise) * 2 * MathF.Exp(-t * 9) * (.6f + .4f * MathF.Sin(t * 70));
+                    float env = (1 - MathF.Exp(-t * 28)) * MathF.Exp(-t * 7.5f);
+                    float b = 0;
+                    foreach (var (at, len, f0, f1) in bubbles)
+                    {
+                        int d = i - at;
+                        if (d < 0 || d >= len) continue;
+                        float u = d / (float)len;
+                        b += MathF.Sin(MathF.Tau * (f0 + (f1 - f0) * u) * d / Rate) * MathF.Sin(u * MathF.PI);   // a rising "blip"
+                    }
+                    s[i] = swish.Run(noise) * 1.3f * env + low.Run(noise) * 1.1f * env + b * .22f;
                 }
-                break;
+                return ToWav(s, Rate, false, .5f);   // half as loud as a step on dry ground
             }
         }
         return ToWav(s);

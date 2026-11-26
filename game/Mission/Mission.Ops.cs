@@ -360,7 +360,7 @@ public partial class Mission
             case Op.Capture:
                 yield return new Capture
                 {
-                    Who = () => Officer, What = "take the officer alive: get right up to him without being seen, then F",
+                    Who = () => Officer, What = "take the officer alive: sneak up and F (or knock him out with G, then F)",
                     Done = () => { Captive = Officer; Hud("Got him. He walks in front of you. Keep your eyes on him."); GD.Print("[mission] officer captured"); },
                     Replay = () => { if (Officer != null) { Officer.Surrender(); Officer.GlobalPosition = Player.GlobalPosition + Player.GlobalTransform.Basis * new Vector3(0, 0, -3); Captive = Officer; } },
                 };

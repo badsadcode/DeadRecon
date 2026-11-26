@@ -260,7 +260,7 @@ public partial class Mission
         public string What = "", Label = "";
         /// <summary>Each frame (more of them on the way, the last one breaking...). Return true to finish early.</summary>
         public Func<float, bool>? Every;
-        private IEnumerable<Guard> Alive => Who().Where(g => IsInstanceValid(g) && g.State != Guard.Mood.Dead && !g.Captive);
+        private IEnumerable<Guard> Alive => Who().Where(g => IsInstanceValid(g) && g.State != Guard.Mood.Dead && !g.Captive && !g.Out);
         public override string Text => $"{What} ({Alive.Count()} left)";
         public override string Marker => Label;
         public override float MarkerLift => 2.4f;
@@ -308,7 +308,7 @@ public partial class Mission
         {
             if (Who() is not { } g || !IsInstanceValid(g) || g.State == Guard.Mood.Dead) { M.Fail("He was worth more alive. HQ is... disappointed."); return false; }
             if (M.Player.Dead || PlayerAt.DistanceTo(g.GlobalPosition) > 2.4f || g.State == Guard.Mood.Alert) return false;
-            DeadRecon.UI.Hud.Prompt("F   \"Hands up. Quietly.\"");
+            DeadRecon.UI.Hud.Prompt(g.Out ? "F   Cuff him and get him up" : "F   \"Hands up. Quietly.\"   (or G: the hard way)");
             if (!Pressed(Key.F)) return false;
             g.Surrender();
             Done?.Invoke();

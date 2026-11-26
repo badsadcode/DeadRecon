@@ -19,7 +19,7 @@ namespace DeadRecon.AI;
 /// </summary>
 public partial class Guard : CharacterBody3D, IDamageable
 {
-    public enum Mood { Patrol, Suspicious, Investigate, Alert, Search, Dead, Captive }
+    public enum Mood { Patrol, Suspicious, Investigate, Alert, Search, Dead, Captive, Unconscious, Restrained }
 
     public Walker Target = null!;
     public TerrainStreamer Terrain = null!;
@@ -184,6 +184,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (State == Mood.Dead) { Fall(dt); return; }
         if (!Terrain.HasCollisionAt(GlobalPosition)) return; // no ground loaded under him yet: stand still (far from the player)
         if (State == Mood.Captive) { CaptiveTick(dt); return; }
+        if (State is Mood.Unconscious or Mood.Restrained) { OutTick(dt); return; }
 
         _stateTime += dt;
         Perceive(dt);
@@ -294,7 +295,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         var forward = -GlobalTransform.Basis.Z;
         foreach (var g in All)
         {
-            if (g == this || g.State != Mood.Dead || _bodiesSeen.Contains(g)) continue;
+            if (g == this || g.State is not (Mood.Dead or Mood.Unconscious or Mood.Restrained) || _bodiesSeen.Contains(g)) continue;
             var body = g.GlobalPosition + Vector3.Up * .3f;
             var to = body - eye;
             float d = to.Length();
@@ -594,6 +595,81 @@ public partial class Guard : CharacterBody3D, IDamageable
     /// <summary>Reinforcements: run to the trouble.</summary>
     public void Respond(Vector3 where) => HearAlarm(where);
 
+    // ================================================================= melee: knocked out, cuffed
+
+    /// <summary>Out of the fight without being dead: knocked out (wakes up in a while) or cuffed (stays put).</summary>
+    public bool Out => State is Mood.Unconscious or Mood.Restrained;
+    private float _koLeft;
+    private bool _fWasOut;
+    private float _mumble;
+
+    /// <summary>A rifle butt. Someone who's fighting you just gets hurt; anyone else goes down and stays down a while.</summary>
+    public void Bashed(Vector3 from)
+    {
+        if (State is Mood.Dead or Mood.Restrained) return;
+        if (State == Mood.Alert || (State == Mood.Captive && !Bolting) || State == Mood.Unconscious)
+        {
+            TakeHit(State == Mood.Unconscious ? 0 : 30, GlobalPosition + Vector3.Up * 1.5f, from);
+            if (State == Mood.Alert) Say("OW! You—");
+            return;
+        }
+        State = Mood.Unconscious;
+        Bolting = false;
+        _koLeft = 50 + Looks.Randf() * 30;
+        Lie(true);
+        GD.Print($"[guard] {Name} knocked out ({_koLeft:0} s)");
+    }
+
+    /// <summary>Cuffed: he isn't going anywhere, now or later.</summary>
+    public void Restrain()
+    {
+        if (State != Mood.Unconscious) return;
+        State = Mood.Restrained;
+        if (_body != null) _body.GunVisible = false;
+        if (_gunPivot != null) _gunPivot.Visible = false;
+        GD.Print($"[guard] {Name} cuffed");
+    }
+
+    /// <summary>Lying on his back (knocked out, cuffed) or back on his feet.</summary>
+    private void Lie(bool down)
+    {
+        var rot = new Vector3(down ? MathF.PI / 2 : 0, 0, 0);
+        if (_body != null) _body.Rotation = rot; else if (_rig != null) _rig.Rotation = rot;
+        var shape = GetChild<CollisionShape3D>(0);
+        shape.Rotation = rot;
+        shape.Position = down ? new Vector3(0, .3f, .85f) : new Vector3(0, .9f, 0);
+        if (_body != null) { _body.Speed = 0; _body.Ready = 0; _body.Crouch = 0; }
+    }
+
+    private void OutTick(float dt)
+    {
+        Velocity = new Vector3(0, IsOnFloor() ? -.5f : Velocity.Y - 9.8f * dt, 0);
+        MoveAndSlide();
+        bool f = Input.IsPhysicalKeyPressed(Key.F) && Input.MouseMode == Input.MouseModeEnum.Captured, fPressed = f && !_fWasOut;
+        _fWasOut = f;
+        bool near = !Target.Dead && Target.GlobalPosition.DistanceTo(GlobalPosition) < 2.3f;
+        if (State == Mood.Restrained)
+        {
+            _mumble -= dt;
+            if (near && _mumble <= 0) { _mumble = 8 + Looks.Randf() * 6; string[] m = { "Mmmf!", "Mmf mmf MMF.", "...mmmf." }; Say(m[(int)(Looks.Randi() % 3)]); }
+            return;
+        }
+        // (On a capture job the officer is the mission's business: F gets him up and walking, not cuffed to the ground.)
+        if (near && !(DeadRecon.Missions.Mission.Current is { Kind: DeadRecon.Missions.Mission.Op.Capture } op && op.Officer == this))
+        {
+            DeadRecon.UI.Hud.Prompt("F   Cuff him");
+            if (fPressed) { Restrain(); return; }
+        }
+        _koLeft -= dt;
+        if (_koLeft > 0) return;
+        // Awake, with a headache and a grudge.
+        Lie(false);
+        State = Mood.Patrol;
+        Say("Ugh... my HEAD... WHO DID THAT?!");
+        Respond(GlobalPosition);
+        GD.Print($"[guard] {Name} woke up");
+    }
+
     // ================================================================= captured (docs/MISSIONS_PLAN.md: capture is physical)
 
     public bool Captive => State == Mood.Captive;
@@ -608,6 +684,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     public void Surrender()
     {
         if (State == Mood.Dead) return;
+        if (Out) Lie(false);
         State = Mood.Captive;
         Bolting = false; Escaped = false; _unwatched = 0;
         if (_body != null) _body.GunVisible = false;

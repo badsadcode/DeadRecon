@@ -68,6 +68,10 @@ public partial class Weapon : Node3D
     private Vector3 _magazineAxis = Vector3.Down, _chargingAxis = Vector3.Back;
     private float _magazineTravel = .25f, _chargingTravel = .07f, _triggerTravel = .3f;
     private float _aim, _cooldown, _kick, _flash = -1, _reload = -1, _bob;
+    /// <summary>The rifle-butt swing (G): 0..1 while swinging, -1 at rest.</summary>
+    private float _bash = -1;
+    private bool _gWasDown;
+    private AudioStreamPlayer? _whoosh, _thwack;
     private bool _forceAim;
     private OmniLight3D _flashLight = null!;
     private MeshInstance3D _flashSprite = null!;
@@ -186,6 +190,22 @@ public partial class Weapon : Node3D
         if (captured && trigger && (Automatic || newPull) && !Walker.FireLockedUntilRelease && _cooldown <= 0 && !Reloading) Fire();
         if (captured && Input.IsPhysicalKeyPressed(Key.V) && !_vWasDown && Def.Auto) { Automatic = !Automatic; _click.Play(); }
         _vWasDown = Input.IsPhysicalKeyPressed(Key.V);
+        // G: hit them with it. Any gun has a butt.
+        bool g = captured && Input.IsPhysicalKeyPressed(Key.G);
+        if (g && !_gWasDown && _bash < 0 && !Reloading && !Walker.Dead && _aim < .5f)
+        {
+            _bash = 0;
+            _whoosh ??= MakePlayer(DeadRecon.Combat.Effects.ThudSound(), -14, 2.2f);
+            _whoosh.Play();
+        }
+        _gWasDown = g;
+        if (_bash >= 0)
+        {
+            float before = _bash;
+            _bash += dt / .5f;
+            if (before < .4f && _bash >= .4f) MeleeHit();
+            if (_bash >= 1) _bash = -1;
+        }
         _noMagsToast -= dt;
         if (captured && Input.IsPhysicalKeyPressed(Key.R) && !Reloading && Ammo < MagazineCapacity)
         {
@@ -207,6 +227,14 @@ public partial class Weapon : Node3D
         _kick = Mathf.MoveToward(_kick, 0, dt * 6);
         Position = HipOffset.Lerp(adsOffset, ease) + bob + new Vector3(0, 0, _kick * .05f);
         Rotation = new Vector3(_kick * (1 - ease * .6f) * .09f, 0, 0);
+        if (_bash >= 0)
+        {
+            // Wind up (pull back and across), then drive the butt forward.
+            float sw = _bash < .4f ? Mathf.SmoothStep(0, 1, _bash / .4f) : 1 - Mathf.SmoothStep(0, 1, (_bash - .4f) / .6f);
+            float wind = _bash < .25f ? _bash / .25f : Math.Max(0, 1 - (_bash - .25f) / .15f);
+            Position += new Vector3(-.12f * sw + .05f * wind, .05f * sw, -.22f * sw + .08f * wind);
+            Rotation += new Vector3(-.25f * sw, 1.1f * sw, .7f * sw);
+        }
         if (_trigger != null) _trigger.Rotation = new Vector3(_cooldown > 0 ? _triggerTravel : 0, 0, 0);
 
 
@@ -220,6 +248,46 @@ public partial class Weapon : Node3D
             _flashSprite.Scale = Vector3.One * (on ? _rng.RandfRange(.8f, 1.4f) : 1);
             if (!on) _flash = -1;
         }
+    }
+
+    private AudioStreamPlayer MakePlayer(AudioStream stream, float db, float pitch)
+    {
+        var p = new AudioStreamPlayer { Stream = stream, VolumeDb = db, PitchScale = pitch, Bus = "Effects" };
+        AddChild(p);
+        return p;
+    }
+
+    /// <summary>The butt lands: the nearest guard in front of you within reach, else whatever's there (an animal, a snake).</summary>
+    private void MeleeHit()
+    {
+        var cam = Walker.Camera.GlobalTransform;
+        var fwd = -cam.Basis.Z;
+        DeadRecon.AI.Guard? best = null;
+        float bd = 2.4f;
+        foreach (var guard in DeadRecon.AI.Guard.All)
+        {
+            if (guard.State is DeadRecon.AI.Guard.Mood.Dead or DeadRecon.AI.Guard.Mood.Restrained) continue;
+            var to = guard.GlobalPosition + Vector3.Up * (guard.Out ? .3f : 1.2f) - cam.Origin;
+            float d = to.Length();
+            if (d < bd && fwd.Dot(to / d) > .55f) { bd = d; best = guard; }
+        }
+        bool hit = false;
+        if (best != null) { best.Bashed(Walker.GlobalPosition); hit = true; }
+        else
+        {
+            var q = PhysicsRayQueryParameters3D.Create(cam.Origin, cam.Origin + fwd * 2.2f, 1, new Godot.Collections.Array<Rid> { Walker.GetRid() });
+            var res = GetWorld3D().DirectSpaceState.IntersectRay(q);
+            if (res.Count > 0)
+            {
+                hit = true;
+                if (res["collider"].AsGodotObject() is DeadRecon.Combat.IDamageable dmg) dmg.TakeHit(25, (Vector3)res["position"], cam.Origin);
+            }
+        }
+        if (!hit) return;
+        _thwack ??= MakePlayer(DeadRecon.Combat.Effects.ThudSound(), -2, .7f);
+        _thwack.PitchScale = .6f + GD.Randf() * .2f;
+        _thwack.Play();
+        DeadRecon.Combat.Hearing.Make(Walker.GlobalPosition, 7, Walker);   // a dull thud; the man next to him hears it
     }
 
     private void Fire()

@@ -82,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -396,6 +396,7 @@ public partial class Main : Node3D
 		if (Arg("rocktest", "") != "") _ = RunRockTest(Arg("rocktest", ""));
 		if (Arg("resumetest", "") != "") _ = RunResumeTest(Arg("resumetest", ""));
 		if (Arg("downtest", "") != "") _ = RunDownTest(Arg("downtest", ""));
+		if (Arg("meleetest", "") != "") _ = RunMeleeTest(Arg("meleetest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -1055,6 +1056,78 @@ public partial class Main : Node3D
 		_walker.TakeHit(10, _walker.Chest, _walker.Chest + Vector3.Forward);
 		await Seconds(.5);
 		GD.Print($"[downtest] 4: gone {_walker.Gone}; mission {_mission.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Melee: sneak up behind a guard, G (knocked out), F (cuffed); a guard who's fighting you just gets hurt;
+	/// on a capture job, knock the officer out and F gets him up as your prisoner.</summary>
+	private async Task RunMeleeTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		async Task Press(Godot.Key key)
+		{
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = key, Keycode = key, Pressed = true });
+			await Frames(3);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = key, Keycode = key, Pressed = false });
+		}
+		void Behind(Guard g)
+		{
+			var back = g.GlobalTransform.Basis.Z with { Y = 0 };   // behind him
+			var at = g.GlobalPosition + back.Normalized() * 1.4f;
+			_walker.GlobalPosition = at with { Y = _world.HeightAt(at.X, at.Z) + .1f };
+			var d = g.GlobalPosition + Vector3.Up * 1.2f - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		var camp = _mission.Camp;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = camp + new Vector3(0, 20, 0);
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(camp)); f++) await Frames(1);
+		_walker.SetFlying(false);
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); }
+		var a = _mission.Guards[0];
+		a.SetPhysicsProcess(true);
+		Behind(a);
+		await Frames(5);
+		GD.Print($"[melee] guard A: {a.State}, {a.GlobalPosition.DistanceTo(_walker.GlobalPosition):0.0} m");
+		await Press(Godot.Key.G);
+		await Seconds(.4);
+		await Shot("1_swing");
+		await Seconds(.4);
+		GD.Print($"[melee] after G: guard A {a.State}");
+		await Press(Godot.Key.F);
+		await Seconds(.3);
+		GD.Print($"[melee] after F: guard A {a.State}");
+		var cam = new Camera3D { Fov = 55 };
+		AddChild(cam);
+		cam.GlobalPosition = a.GlobalPosition + new Vector3(2.5f, 1.8f, 2.5f);
+		cam.LookAt(a.GlobalPosition + Vector3.Up * .3f);
+		cam.MakeCurrent();
+		await Shot("2_cuffed");
+		_walker.Camera.MakeCurrent();
+		// A guard who's fighting you: just hurt.
+		var b = _mission.Guards[2];
+		b.SetPhysicsProcess(true);
+		b.Respond(_walker.GlobalPosition);
+		b.SetHealthForTest(100);
+		Behind(b);
+		await Frames(2);
+		GD.Print($"[melee] guard B before: {b.State}");
+		var bState = b.State;
+		await Press(Godot.Key.G);
+		await Seconds(.8);
+		GD.Print($"[melee] guard B ({bState}) after G: {b.State}");
 		GetTree().Quit();
 	}
 
@@ -2730,6 +2803,9 @@ public partial class Main : Node3D
 			Guard.Mood.Investigate => "coming to look",
 			Guard.Mood.Alert => "ALERT",
 			Guard.Mood.Search => "searching",
+			Guard.Mood.Unconscious => "out cold",
+			Guard.Mood.Restrained => "cuffed, sulking",
+			Guard.Mood.Captive => "your prisoner",
 			_ => "has retired permanently",
 		};
 		return $"{mood} ({_guard.Suspicion * 100:0}%, {d:0} m, health {Math.Max(0, _guard.Health):0})";
