@@ -327,7 +327,7 @@ public partial class Villager : CharacterBody3D, IDamageable
         GlobalPosition = Foliage.PushOut(GlobalPosition, .32f);
         // Fell through the world or got buried (terrain streaming in late): put back on the ground.
         float ground = World.HeightAt(GlobalPosition.X, GlobalPosition.Z);
-        if (GlobalPosition.Y < ground - 1.5f) GlobalPosition = new Vector3(GlobalPosition.X, ground + .1f, GlobalPosition.Z);
+        if (GlobalPosition.Y < ground - .25f) { GlobalPosition = new Vector3(GlobalPosition.X, ground + .05f, GlobalPosition.Z); Velocity = Vector3.Zero; }
         if (speed > 0 && Flat(GlobalPosition - before) < speed * dt * .3f) _stuck += dt; else _stuck = Math.Max(0, _stuck - dt);
         if (_stuck > 1.2f)
         {

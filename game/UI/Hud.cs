@@ -165,7 +165,7 @@ public partial class Hud : Control
         if (DeadRecon.Gear.Kit.Current is { } kit)
         {
             int dressings = kit.Medical;
-            Text(hp + new Vector2(0, 30), kit.Healing ? "PATCHING UP..." : $"H   DRESSINGS x{dressings}", 13, kit.Healing ? Amber : dressings == 0 ? new Color(Danger, .8f) : Dim);
+            Text(hp + new Vector2(0, 30), kit.Venom > 0 ? $"VENOM!  H x{dressings}" : kit.Healing ? "PATCHING UP..." : $"H   DRESSINGS x{dressings}", 13, kit.Venom > 0 ? Danger : kit.Healing ? Amber : dressings == 0 ? new Color(Danger, .8f) : Dim);
             Text(hp + new Vector2(150, 30), "TAB   KIT", 13, Dim);
         }
 

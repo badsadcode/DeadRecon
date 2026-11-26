@@ -377,6 +377,7 @@ public partial class Wildlife : Node
             var centre = pack.Count > 0 ? pack[0].GlobalPosition : at;
             if (pack.Count == 0 || Flat(centre - p) > 420) { foreach (var a in pack) if (IsInstanceValid(a)) a.QueueFree(); _wild.RemoveAt(i); }
         }
+        UpdateSnakes(p);
         if (_wild.Count >= WildGroups || Catalogue.Count == 0) return;
         // A new group, out of sight, 120-300 m away, where that animal lives.
         var wild = Catalogue.Values.Where(a => a.Where is "jungle" or "river").ToList();
@@ -401,6 +402,69 @@ public partial class Wildlife : Node
             _wild.Add((at, pack));
             break;
         }
+    }
+
+    // ================================================================= snakes (made in code: see Snake.cs)
+
+    private static readonly SnakeDef[] BuiltinSnakes =
+    {
+        new("cobra", "Cobra", 1.7f, .035f, "warns", 30, "#3b3424", "#1c1810", "#c9b98a", 0, Hood: true, Weight: 1),
+        new("viper", "Green pit viper", .75f, .028f, "ambush", 22, "#4f8a2a", "#2f5c18", "#c8d46a", 0, Weight: 1.4f),
+        new("krait", "Banded krait", 1.3f, .026f, "shy", 45, "#141414", "#d8b520", "#d9cfa0", 1, 9, Night: true, Weight: .8f),
+        new("python", "Reticulated python", 4.2f, .085f, "harmless", 0, "#7a6440", "#2a2216", "#d6c79a", 3, 5, Weight: .5f),
+        new("rat_snake", "Rat snake", 1.9f, .03f, "shy", 0, "#5b5a2e", "#2f2e18", "#e2d58c", 2, 7, Weight: 1),
+    };
+
+    /// <summary>Snake kinds ("snakes" content section; mods add more by id).</summary>
+    public static Dictionary<string, SnakeDef> Snakes => _snakes ??= DeadRecon.Data.Content.Get("snakes", BuiltinSnakes).ToDictionary(a => a.Id);
+    private static Dictionary<string, SnakeDef>? _snakes;
+    private readonly List<Snake> _snakeList = new();
+    private const int SnakeCount = 3;
+
+    /// <summary>A few snakes near you at any time (25-80 m, never in villages or at home); gone past 150 m.</summary>
+    private void UpdateSnakes(Vector3 p)
+    {
+        _snakeList.RemoveAll(s => !IsInstanceValid(s));
+        foreach (var s in _snakeList.ToArray())
+            if (Flat(s.GlobalPosition - p) > 150) { _snakeList.Remove(s); s.QueueFree(); }
+        if (_snakeList.Count >= SnakeCount || Snakes.Count == 0) return;
+        float hour = DeadRecon.World.TimeOfDay.Current?.Hour ?? 12;
+        bool night = hour < 6 || hour > 19;
+        var kinds = Snakes.Values.Where(k => !k.Night || night).ToList();
+        if (kinds.Count == 0) return;
+        float total = kinds.Sum(a => a.Weight), r = _rng.Randf() * total;
+        var def = kinds[^1];
+        foreach (var a in kinds) { r -= a.Weight; if (r <= 0) { def = a; break; } }
+        for (int tries = 0; tries < 8; tries++)
+        {
+            float ang = _rng.Randf() * MathF.Tau, dist = _rng.RandfRange(25, 80);
+            var at = p + new Vector3(MathF.Cos(ang) * dist, 0, MathF.Sin(ang) * dist);
+            if (Math.Abs(at.X) > World.Half - 20 || Math.Abs(at.Z) > World.Half - 20) continue;
+            var (gx, gz) = World.ToSample(at.X, at.Z);
+            if (World.IsWet((int)gx, (int)gz)) continue;
+            if (Towns?.SiteAt(at.X, at.Z, 1.5f) != null) continue;
+            if (DeadRecon.Base.HomeBase.Position is { } home && Flat(home - at) < 50) continue;
+            _snakeList.Add(SpawnSnake(def, at, (int)_rng.Randi()));
+            break;
+        }
+    }
+
+    private Snake SpawnSnake(SnakeDef def, Vector3 at, int seed)
+    {
+        var s = new Snake { Def = def, Player = Player, World = World, Seed = seed, Name = $"Snake_{def.Id}_{seed}" };
+        AddChild(s);
+        s.GlobalPosition = at with { Y = World.HeightAt(at.X, at.Z) };
+        s.Rotation = new Vector3(0, _rng.Randf() * MathF.Tau, 0);
+        return s;
+    }
+
+    /// <summary>Tests: one snake of this kind right here.</summary>
+    public Snake TestSnake(string id, Vector3 at, float yaw)
+    {
+        var s = SpawnSnake(Snakes[id], at, 500 + _snakeList.Count);
+        s.Rotation = new Vector3(0, yaw, 0);
+        _snakeList.Add(s);
+        return s;
     }
 
     /// <summary>Tests: a group of this kind right here.</summary>

@@ -74,7 +74,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -364,6 +364,7 @@ public partial class Main : Node3D
 		if (baseTest != "") _ = RunBaseTest(baseTest);
 		if (Arg("risktest", "") != "") _ = RunRiskTest();
 		if (Arg("zootest", "") != "") _ = RunZooTest(Arg("zootest", ""));
+		if (Arg("snaketest", "") != "") _ = RunSnakeTest(Arg("snaketest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -919,6 +920,83 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Animals: the nearest village's dogs and livestock, then wildlife beside you, then a gunshot.</summary>
+	private async Task RunSnakeTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[snake] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10f;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		var village = _towns.Sites.Where(s => s.Kind == "village").OrderBy(s => s.Centre.DistanceTo(_walker.GlobalPosition)).First();
+		var spot = village.Centre + new Vector3(80, 0, -80);
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = spot + new Vector3(0, 30, 0);
+		for (int f = 0; f < 2400 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(spot)); f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = spot with { Y = _world.HeightAt(spot.X, spot.Z) + 1 };
+		await Seconds(1);
+		// A line-up, resting (the python further back: it's long).
+		var kinds = new[] { "cobra", "viper", "krait", "rat_snake", "python" };
+		var line = new System.Collections.Generic.List<DeadRecon.People.Snake>();
+		for (int i = 0; i < kinds.Length; i++)
+			line.Add(_wildlife!.TestSnake(kinds[i], spot + new Vector3(-4f + i * 2f, 0, -7 - (kinds[i] == "python" ? 2 : 0)), MathF.PI * .5f));
+		await Seconds(2);
+		// A camera of our own, low down, for the photos.
+		var cam = new Camera3D { Fov = 40, Near = .02f };
+		AddChild(cam);
+		void Frame(Vector3 from, Vector3 at, float fov) { cam.GlobalPosition = from; cam.LookAt(at); cam.Fov = fov; cam.MakeCurrent(); }
+		float H(Vector3 v) => _world.HeightAt(v.X, v.Z);
+		var mid = spot + new Vector3(0, 0, -7.5f); mid.Y = H(mid);
+		Frame(mid + new Vector3(0, 1.3f, 3.2f), mid + Vector3.Up * .05f, 55);
+		await Shot("1_lineup");
+		var py = line[4].GlobalPosition;
+		var fwd = line[4].GlobalTransform.Basis.Z.Normalized(); var right = line[4].GlobalTransform.Basis.X.Normalized();
+		Frame(py + fwd * 1.3f + right * 1.1f + Vector3.Up * .8f, py - fwd * 1.2f, 50);
+		await Shot("2_python");
+		// Slithering.
+		line[3].TestGo(line[3].GlobalPosition + new Vector3(0, 0, 6));
+		line[4].TestGo(line[4].GlobalPosition + new Vector3(-3, 0, 6));
+		await Seconds(2.5);
+		var rs = line[3].GlobalPosition;
+		Frame(rs + new Vector3(1.2f, 1.4f, 1.8f), rs + new Vector3(0, 0, -.8f), 50);
+		await Shot("3_slither");
+		var vp = line[1].GlobalPosition;
+		var vf = line[1].GlobalTransform.Basis.Z.Normalized();
+		Frame(vp + vf * .45f + line[1].GlobalTransform.Basis.X.Normalized() * .3f + Vector3.Up * .25f, vp - vf * .15f, 40);
+		await Shot("3b_viper_head");
+		// Walk up to the cobra: it rears, spreads its hood and hisses.
+		foreach (var s in line.Where((s, i) => i != 0)) s.QueueFree();
+		var cobra = line[0];
+		var c = cobra.GlobalPosition;
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = c + new Vector3(3.2f, 1, 0);
+		await Seconds(2);
+		Frame(c + new Vector3(1.2f, .7f, 1.6f), c + new Vector3(0, .35f, -.2f), 45);
+		await Shot("4_cobra_warns");
+		_walker.GlobalPosition = c + new Vector3(1.4f, 1, 0);
+		for (int f = 0; f < 240 && (DeadRecon.Gear.Kit.Current?.Venom ?? 0) <= 0; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		await Shot("5_strike");
+		GD.Print($"[snake] cobra bite: venom {DeadRecon.Gear.Kit.Current?.Venom ?? -1:0.0}");
+		_walker.GlobalPosition = c + new Vector3(8, 1, 0);
+		await Seconds(1);
+		cobra.TakeHit(999, cobra.GlobalPosition, _walker.GlobalPosition);
+		GD.Print($"[snake] cobra dead: {cobra.Dead}; snakes spawned naturally will appear around you");
+		await Seconds(1);
+		GetTree().Quit();
+	}
+
 	private async Task RunZooTest(string dir)
 	{
 		Directory.CreateDirectory(dir);

@@ -63,6 +63,9 @@ public partial class Kit : Node
     public event Action? Changed, LoadoutChanged;
 
     private float _healLeft;
+    /// <summary>Snake venom in you: drains health until a dressing (H).</summary>
+    public float Venom { get; private set; }
+    public void Poison(float amount) => Venom = Math.Max(Venom, 0) + amount;
     private readonly HashSet<Guard> _searched = new();
 
     /// <summary>Places to search once (crates at a camp or a checkpoint): where, the prompt, what you get (returns a message).</summary>
@@ -333,6 +336,13 @@ public partial class Kit : Node
             Player.Heal(h);
             _healLeft -= h;
         }
+        if (Venom > 0 && !Player.Dead)
+        {
+            float v = Math.Min(Venom, (1.2f + Venom * .02f) * dt);
+            Venom -= v;
+            Player.TakeHit(v, Player.GlobalPosition, Player.GlobalPosition);
+            if (Player.Dead) Venom = 0;
+        }
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
         bool hKey = Input.IsPhysicalKeyPressed(Key.H), lKey = Input.IsPhysicalKeyPressed(Key.L), fKey = Input.IsPhysicalKeyPressed(Key.F);
         if (captured && hKey && !_hWas) UseMedical(null);
@@ -376,11 +386,13 @@ public partial class Kit : Node
         item ??= Vest.Items.FirstOrDefault(i => i.Def == ItemDef.Bandage) ?? Pack.Items.FirstOrDefault(i => i.Def == ItemDef.Bandage)
               ?? AllItems.FirstOrDefault(i => i.Def.Kind == ItemKind.Medical);
         if (item == null) { Hud.Toast("No dressings left"); return; }
-        if (Player.Health >= Walker.MaxHealth - .5f) { Hud.Toast("You're fine. Mostly."); return; }
+        if (Player.Health >= Walker.MaxHealth - .5f && Venom <= 0) { Hud.Toast("You're fine. Mostly."); return; }
+        bool wasVenom = Venom > 0;
+        Venom = 0;
         _healLeft += item.Def.Heal;
         item.Count--;
         if (item.Count <= 0) GridOf(item)?.Items.Remove(item);
-        Hud.Toast(item.Def == ItemDef.Bandage ? "Patching yourself up..." : "Rice. Grandmother was right.");
+        Hud.Toast(wasVenom ? "Tourniquet, suck, spit, pray. The venom's out." : item.Def == ItemDef.Bandage ? "Patching yourself up..." : "Rice. Grandmother was right.");
         Changed?.Invoke(); Save();
     }
 

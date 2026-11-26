@@ -482,7 +482,7 @@ public partial class KitScreen : Control
 
         var b = at + new Vector2(30, 280);
         if (item.Def.Kind == ItemKind.Medical)
-            Button(new Rect2(b, new Vector2(200, 42)), "USE", () => Kit.UseMedical(item), Player.Health < Walker.MaxHealth, primary: true);
+            Button(new Rect2(b, new Vector2(200, 42)), "USE", () => Kit.UseMedical(item), Player.Health < Walker.MaxHealth || Kit.Venom > 0, primary: true);
         if (item.Def.Kind == ItemKind.Attachment && Kit.GridOf(item) != null)
         {
             Button(new Rect2(b, new Vector2(240, 42)), "FIT TO RIFLE", () => { if (Kit.Fit(item.Def.Slot, item) is { } why) Say(why); else Say($"Fitted: {item.Def.Name}"); }, primary: true);

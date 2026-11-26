@@ -207,7 +207,7 @@ public partial class Comrade : CharacterBody3D, IDamageable
         MoveAndSlide();
         GlobalPosition = Foliage.PushOut(GlobalPosition, .35f);
         float ground = World.HeightAt(GlobalPosition.X, GlobalPosition.Z);
-        if (GlobalPosition.Y < ground - 1.5f) GlobalPosition = GlobalPosition with { Y = ground + .2f };
+        if (GlobalPosition.Y < ground - .25f) { GlobalPosition = GlobalPosition with { Y = ground + .05f }; Velocity = Vector3.Zero; }
         if (speed > 0 && Flat(GlobalPosition - before) < speed * dt * .3f) _stuck += dt; else _stuck = Math.Max(0, _stuck - dt);
         if (_stuck > 1) { _stuck = 0; _side = to.Normalized().Cross(Vector3.Up) * (_rng.Randf() < .5f ? 1 : -1); _sideLeft = 1; }
         if (look is { } l)

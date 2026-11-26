@@ -310,6 +310,7 @@ public static class Synth
             "moo" => (.9f, 130f, 105f, 420f, .15f, 1, 0f),
             "growl" => (1.1f, 70f, 85f, 300f, .6f, 1, 0f),
             "trumpet" => (.8f, 380f, 620f, 1500f, .3f, 1, 0f),
+            "hiss" => (.9f + variant * .15f, 100f, 100f, 4200f, 1f, 1, 0f),
             _ => (.18f, 900f, 600f, 1800f, .3f, 1, 0f),     // yelp
         };
         var bp = Biquad.BandPass(formant * v, 2.2f);
@@ -327,7 +328,7 @@ public static class Synth
                 ph += MathF.Tau * f / Rate;
                 float src = (ph / MathF.Tau % 1) * 2 - 1;                       // saw: buzzy, voice-like
                 float n = (float)rng.NextDouble() * 2 - 1;
-                float env = MathF.Min(1, t * 25) * MathF.Pow(1 - t, kind is "moo" or "trumpet" or "growl" ? .6f : 1.8f);
+                float env = MathF.Min(1, t * 25) * MathF.Pow(1 - t, kind is "moo" or "trumpet" or "growl" or "hiss" ? .6f : 1.8f);
                 o[at + i] = (bp.Run(src * (1 - noise) + n * noise) * 2.4f + lp.Run(src) * .25f) * env;
             }
             at += one + gapN;
