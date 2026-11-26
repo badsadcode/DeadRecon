@@ -82,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest") || a.StartsWith("--moraletest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest") || a.StartsWith("--moraletest") || a.StartsWith("--windtest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -402,6 +402,7 @@ public partial class Main : Node3D
 		if (Arg("meleetest", "") != "") _ = RunMeleeTest(Arg("meleetest", ""));
 		if (Arg("rivertest", "") != "") _ = RunRiverTest(Arg("rivertest", ""));
 		if (Arg("moraletest", "") != "") _ = RunMoraleTest(Arg("moraletest", ""));
+		if (Arg("windtest", "") != "") _ = RunWindTest(Arg("windtest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -1408,6 +1409,49 @@ public partial class Main : Node3D
 		await Shot("3_surrendered");
 		await Seconds(3);
 		GD.Print($"[morale] reinforcements: {_mission.Reinforcements}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Trees: the same canopy twice, 0.7 s apart (is it moving?), in a breeze and in a storm; and looking up
+	/// toward a low sun (light through the leaves).</summary>
+	private async Task RunWindTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[wind] shot {name}");
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 11;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		for (int f = 0; f < 2400 && (_waitingForGround || !_terrain.Settled || _trees.Pending > 0); f++) await Frames(1);
+		await Seconds(2);
+		var cam = new Camera3D { Fov = 60, Near = .05f };
+		AddChild(cam);
+		var eye = _walker.GlobalPosition + Vector3.Up * 1.6f;
+		cam.GlobalPosition = eye;
+		cam.LookAt(eye + new Vector3(0, .35f, -1));
+		cam.MakeCurrent();
+		await Seconds(1);
+		await Shot("1_breeze_a"); await Seconds(.7); await Shot("1_breeze_b");
+		_weather.SetNow(Weather.Kind.Storm);
+		await Seconds(3);
+		await Shot("2_storm_a"); await Seconds(.7); await Shot("2_storm_b");
+		_weather.SetNow(Weather.Kind.Clear);
+		// Low sun: find where it is, look up toward it through the canopy.
+		_time.Hour = 17.3f;
+		await Seconds(2);
+		var sun = GetTree().Root.FindChildren("*", nameof(DirectionalLight3D), true, false).OfType<DirectionalLight3D>().First();
+		var toSun = sun.GlobalTransform.Basis.Z;   // a directional light shines along -Z
+		cam.LookAt(eye + (toSun with { Y = Math.Max(toSun.Y, .45f) }).Normalized());
+		await Seconds(1);
+		await Shot("3_into_the_sun");
+		cam.LookAt(eye - (toSun with { Y = -.3f }).Normalized() * 3 + Vector3.Up * 1.5f);
+		await Shot("4_sun_behind_you");
 		GetTree().Quit();
 	}
 

@@ -163,6 +163,7 @@ public partial class Weather : Node3D
 
         Terrain.SetWetness(Wetness);
         Trees.SetWetness(Wetness);
+        Trees.SetWind(.25f + .75f * Intensity);
         Cover.SetWetness(Wetness);
 
         // Sound: light rain is patter, heavy rain is a roar.

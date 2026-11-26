@@ -38,6 +38,9 @@ public partial class TreeScatter : Node3D
     private readonly List<float> _trunkRadius = new();    // per variant, measured from the model at body height (scale 1)
     private readonly List<float> _footRadius = new();     // per variant, the root flare near the ground (scale 1)
     private static readonly List<(BaseMaterial3D Mat, float Rough, Color Albedo)> WetMaterials = new();
+    /// <summary>The trees' own shaders (leaves.gdshader, bark.gdshader): wet and wind are uniforms.</summary>
+    private static readonly List<ShaderMaterial> TreeShaders = new();
+    private static Shader? _leafShader, _barkShader;
 
     /// <summary>Places with no trees (mission camp, landing zone): centre (x, z) and radius. Set before planting.</summary>
     public static readonly List<(Vector2 Centre, float Radius)> Clearings = new();
@@ -51,8 +54,15 @@ public partial class TreeScatter : Node3D
     /// <summary>Other materials that should get darker and shinier in the rain (village walls, roofs...).</summary>
     public static void RegisterWet(BaseMaterial3D m) => WetMaterials.Add((m, m.Roughness, m.AlbedoColor));
 
+    /// <summary>Weather: 0 calm .. 1 storm. Trees sway, branches bow, leaves shiver (Noor wind channels).</summary>
+    public void SetWind(float strength)
+    {
+        foreach (var m in TreeShaders) m.SetShaderParameter("wind", strength);
+    }
+
     public void SetWetness(float wet)
     {
+        foreach (var m in TreeShaders) m.SetShaderParameter("wet", wet);
         foreach (var (mat, rough, albedo) in WetMaterials)
         {
             mat.Roughness = Mathf.Lerp(rough, .28f, wet);
@@ -145,6 +155,7 @@ public partial class TreeScatter : Node3D
             _footRadius.Add(MeasureTrunk(lods[0], .02f, .45f, .7f));
         }
         WetMaterials.Clear();
+        TreeShaders.Clear();
         Foliage.TrunkHit += OnTrunkHit;
         if (_variants.Count == 0) GD.PushWarning("No trees found in res://assets/trees (Jungle_tree_NN_LODn.glb). The jungle will be bald.");
         _cellsPerSide = (int)MathF.Ceiling(World.Size / CellSize);
@@ -449,6 +460,7 @@ public partial class TreeScatter : Node3D
         {
             var mat = mesh.SurfaceGetMaterial(s);
             if (mat is BaseMaterial3D bm && bm.Transparency != BaseMaterial3D.TransparencyEnum.Disabled) continue; // leaves
+            if (mat is ShaderMaterial sm && sm.Shader == _leafShader) continue;
             foreach (var v in mesh.SurfaceGetArrays(s)[(int)Mesh.ArrayType.Vertex].AsVector3Array())
                 if (v.Y > y0 && v.Y < y1) d.Add(new Vector2(v.X, v.Z).Length());
         }
@@ -466,6 +478,27 @@ public partial class TreeScatter : Node3D
         return new Color(bright * (1 + .18f * warm), bright, bright * (1 - .22f * warm));
     }
 
+    /// <summary>NoorForm's standard material as our tree shader: leaves (cut-out cards) get leaves.gdshader with its
+    /// wind and light through the leaves; bark gets bark.gdshader. Textures and colours carried over.</summary>
+    private static ShaderMaterial? TreeShader(BaseMaterial3D m)
+    {
+        _leafShader ??= GD.Load<Shader>("res://game/World/leaves.gdshader");
+        _barkShader ??= GD.Load<Shader>("res://game/World/bark.gdshader");
+        if (_leafShader == null || _barkShader == null) return null;
+        bool leaves = m.Transparency != BaseMaterial3D.TransparencyEnum.Disabled;
+        var sm = new ShaderMaterial { Shader = leaves ? _leafShader : _barkShader };
+        if (m.AlbedoTexture != null) sm.SetShaderParameter("albedo_tex", m.AlbedoTexture);
+        sm.SetShaderParameter("albedo", m.AlbedoColor);
+        if (leaves) sm.SetShaderParameter("alpha_cut", m.Transparency == BaseMaterial3D.TransparencyEnum.AlphaScissor ? m.AlphaScissorThreshold : .45f);
+        else
+        {
+            sm.SetShaderParameter("rough", m.Roughness);
+            if (m.NormalEnabled && m.NormalTexture != null) { sm.SetShaderParameter("normal_tex", m.NormalTexture); sm.SetShaderParameter("has_normal", true); }
+        }
+        TreeShaders.Add(sm);
+        return sm;
+    }
+
     /// <summary>Merge every MeshInstance3D of an imported tree scene into one mesh (one surface per material).</summary>
     private static ArrayMesh MeshFromScene(PackedScene scene)
     {
@@ -479,9 +512,18 @@ public partial class TreeScatter : Node3D
                 for (int s = 0; s < mesh.GetSurfaceCount(); s++)
                 {
                     var arrays = mesh.SurfaceGetArrays(s);
-                    // NoorForm puts wind data in CUSTOM channels; re-adding those needs their format flags. Wind
-                    // isn't animated yet, so drop them (TODO: keep them when the wind shader exists).
-                    for (int c = (int)Mesh.ArrayType.Custom0; c <= (int)Mesh.ArrayType.Custom3; c++) arrays[c] = default;
+                    // NoorForm's wind data: TEXCOORD_1 arrives as UV2, TEXCOORD_2 as CUSTOM0. Re-adding a CUSTOM
+                    // channel needs its format flags, so they're carried over from the imported surface.
+                    long customFlags = 0;
+                    if (mesh is ArrayMesh am)
+                    {
+                        long fmt = (long)am.SurfaceGetFormat(s);
+                        int baseShift = (int)Mesh.ArrayFormat.FormatCustomBase, bits = (int)Mesh.ArrayFormat.FormatCustomBits;
+                        for (int c = 0; c < 4; c++) customFlags |= fmt & ((long)Mesh.ArrayFormat.FormatCustomMask << (baseShift + c * bits));
+                    }
+                    for (int c = 0; c < 4; c++)
+                        if ((customFlags & ((long)Mesh.ArrayFormat.FormatCustomMask << ((int)Mesh.ArrayFormat.FormatCustomBase + c * (int)Mesh.ArrayFormat.FormatCustomBits))) == 0)
+                            arrays[(int)Mesh.ArrayType.Custom0 + c] = default;
                     if (xf != Transform3D.Identity)
                     {
                         var v = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
@@ -491,9 +533,10 @@ public partial class TreeScatter : Node3D
                         arrays[(int)Mesh.ArrayType.Vertex] = v;
                         arrays[(int)Mesh.ArrayType.Normal] = n;
                     }
-                    result.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                    result.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, (Mesh.ArrayFormat)customFlags);
                     var material = mi.GetActiveMaterial(s);
-                    if (material is BaseMaterial3D bm)
+                    if (material is BaseMaterial3D std && TreeShader(std) is { } shaded) material = shaded;
+                    else if (material is BaseMaterial3D bm)
                     {
                         bm = (BaseMaterial3D)bm.Duplicate();
                         // Per-tree tint arrives as the instance colour, which only reaches albedo via vertex colour.
