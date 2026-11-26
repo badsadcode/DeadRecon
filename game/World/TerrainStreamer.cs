@@ -37,6 +37,8 @@ public partial class TerrainStreamer : Node3D
     private double _sinceUpdate = 1;
     private Material _groundMaterial = null!;
     private ShaderMaterial _waterMaterial = null!;
+    /// <summary>The water material (river.gdshader), shared with the river ribbons.</summary>
+    public ShaderMaterial WaterMaterial => _waterMaterial;
     // River's procedural ripple normals and foam (ProceduralTextures.cs), made once.
     private static readonly Lazy<ImageTexture> RippleLarge = new(() => ProceduralTextures.WaterNormals(512, 11, 4, 7f));
     private static readonly Lazy<ImageTexture> RippleSmall = new(() => ProceduralTextures.WaterNormals(512, 23, 8, 10f));
@@ -237,6 +239,8 @@ public partial class TerrainStreamer : Node3D
             float sum = 0; int wet = 0;
             foreach (float l in lv) if (!float.IsNaN(l)) { sum += l; wet++; }
             if (wet == 0) continue;
+            // Rivers are drawn as ribbons along their lines (RiverRibbons); the grid does lakes, pools and the sea.
+            if (World.IsRiver(gx, gz) || World.IsRiver(gx + step, gz) || World.IsRiver(gx, gz + step) || World.IsRiver(gx + step, gz + step)) continue;
             float avg = sum / wet;
             // A dry corner: the water's level, but tucked just under the ground there, so the sheet meets the bank
             // instead of ending in a floating edge over lower ground (Tom: gaps and slabs along the rivers).

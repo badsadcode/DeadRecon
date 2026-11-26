@@ -177,6 +177,7 @@ public partial class Main : Node3D
 		_trees = new TreeScatter { World = _world, Viewer = _walker };
 		_cover = new GroundCover { World = _world, Viewer = _walker };
 		AddChild(_terrain);
+		AddChild(new RiverRibbons { World = _world, Material = _terrain.WaterMaterial });
 		AddChild(_trees);
 		AddChild(_cover);
 		_villages = new Villages { World = _world, Towns = _towns, Viewer = _walker };
@@ -1166,6 +1167,18 @@ public partial class Main : Node3D
 				bool wide = _world.IsWet(gx + 4, gz) && _world.IsWet(gx - 4, gz) || _world.IsWet(gx, gz + 4) && _world.IsWet(gx, gz - 4);
 				if (wide) found = new Vector3(x, _world.Water(gx, gz), z);
 			}
+		// A river line nearby beats any old wet sample (the ribbons are what we're looking at).
+		Vector3? lineDir = null;
+		float bestLine = 2000;
+		foreach (var rl in RiverRibbons.Lines)
+			for (int i = 1; i < rl.X.Length - 1; i++)
+			{
+				float d = new Vector2(rl.X[i] - start.X, rl.Z[i] - start.Z).Length();
+				if (d >= bestLine) continue;
+				bestLine = d;
+				found = new Vector3(rl.X[i], rl.S[i], rl.Z[i]);
+				lineDir = new Vector3(rl.X[i + 1] - rl.X[i - 1], 0, rl.Z[i + 1] - rl.Z[i - 1]).Normalized();
+			}
 		if (found is not { } w) { GD.Print("[river] no river near"); GetTree().Quit(); return; }
 		GD.Print($"[river] river {w.DistanceTo(start):0} m away at {w}");
 		// Which way does it run? Fit the water's slope the way the streamer does, and find the bank.
@@ -1190,6 +1203,12 @@ public partial class Main : Node3D
 		await Seconds(3);
 		var across = (w - bank) with { Y = 0 };
 		across = across.LengthSquared() > .1f ? across.Normalized() : Vector3.Forward;
+		if (lineDir is { } ld)
+		{
+			// On a river line: the bank is 8 m to its side, looking along the river.
+			across = new Vector3(ld.Z, 0, -ld.X);
+			bank = w - across * 8; bank.Y = _world.HeightAt(bank.X, bank.Z);
+		}
 		var along = new Vector3(-across.Z, 0, across.X);
 		Frame(bank + Vector3.Up * 2.2f - across * 2, w + along * 25 + across * 4);
 		await Shot("1_bank_morning");

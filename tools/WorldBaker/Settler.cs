@@ -108,6 +108,9 @@ static class Settler
             Directory.CreateDirectory(raw);
             foreach (var f in Directory.GetFiles(Path.Combine(dir, "tiles"), "h_*.r16")) File.Copy(f, Path.Combine(raw, Path.GetFileName(f)));
         }
+        // The generator's water too (the river carve rewrites the water tiles; settling again starts from these).
+        if (!File.Exists(Path.Combine(raw, "w_0_0.r16")))
+            foreach (var f in Directory.GetFiles(Path.Combine(dir, "tiles"), "w_*.r16")) File.Copy(f, Path.Combine(raw, Path.GetFileName(f)));
         var H = new float[S * S];
         var wet = new bool[S * S];
         var waterLevel = new float[S * S];
@@ -115,7 +118,7 @@ static class Settler
         for (int tx = 0; tx < per; tx++)
         {
             var hb = File.ReadAllBytes(Path.Combine(raw, $"h_{tx}_{tz}.r16"));
-            var wb = File.ReadAllBytes(Path.Combine(dir, "tiles", $"w_{tx}_{tz}.r16"));
+            var wb = File.ReadAllBytes(Path.Combine(raw, $"w_{tx}_{tz}.r16"));
             for (int j = 0; j < n; j++)
             for (int i = 0; i < n; i++)
             {
@@ -463,6 +466,7 @@ static class Settler
         Log($"  {fields.Count} fields ({fields.Count(f => f.Kind == "paddy")} rice paddies, {fields.Count(f => f.Kind == "wheat")} wheat)");
 
         // ---- river banks, last: after the sites and roads are placed, so they stay exactly where they were
+        RiverCarver.Carve(dir, RiverCarver.Load(dir), H, wet, waterLevel, S, spacing, half);
         SoftenBanks(H, wet, waterLevel, S, spacing);
 
         // ---- write
@@ -477,6 +481,16 @@ static class Settler
                 BitConverter.TryWriteBytes(bytes.AsSpan((j * n + i) * 2), (ushort)v);
             }
             File.WriteAllBytes(Path.Combine(dir, "tiles", $"h_{tx}_{tz}.r16"), bytes);
+            var wbytes = new byte[n * n * 2];
+            for (int j = 0; j < n; j++)
+            for (int i = 0; i < n; i++)
+            {
+                int g = (tz * (n - 1) + j) * S + tx * (n - 1) + i;
+                ushort v = 0;
+                if (wet[g] && !float.IsNaN(waterLevel[g])) v = (ushort)Math.Clamp(Math.Round((waterLevel[g] - hMin) / hStep), 1, ushort.MaxValue);
+                BitConverter.TryWriteBytes(wbytes.AsSpan((j * n + i) * 2), v);
+            }
+            File.WriteAllBytes(Path.Combine(dir, "tiles", $"w_{tx}_{tz}.r16"), wbytes);
         }
         Png.Write(Path.Combine(dir, "settle_mask.png"), S, S, mask);
         var json = new
@@ -728,5 +742,6 @@ static class Settler
         Png.Write(path, px, px, rgb);
     }
 
+    public static void Say(string message) => Log(message);
     static void Log(string message) => Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {message}");
 }

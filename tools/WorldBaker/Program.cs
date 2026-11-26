@@ -39,6 +39,9 @@ static class Program
     {
         if (args.Length < 1) { Console.Error.WriteLine("usage: WorldBaker <recipe.world.json> [outDir]  |  WorldBaker settle <worldDir>"); return 2; }
         if (args[0] == "settle") { Settler.Run(Path.GetFullPath(args.Length > 1 ? args[1] : "world/jungle")); return 0; }
+        // rivers <recipe> [outDir]: re-plan (same seed, same rivers) and write rivers.json only, no tiles.
+        bool riversOnly = args[0] == "rivers";
+        if (riversOnly) args = args[1..];
         string recipePath = Path.GetFullPath(args[0]);
         var json = new JsonSerializerOptions { PropertyNameCaseInsensitive = true, ReadCommentHandling = JsonCommentHandling.Skip };
         var recipe = JsonSerializer.Deserialize<Recipe>(File.ReadAllText(recipePath), json) ?? throw new InvalidDataException("Empty recipe.");
@@ -59,6 +62,13 @@ static class Program
                                  stage: i => Log($"  stage: {WorldPlan.StageNames[i]}"));
         var terrain = new TerrainSampler(plan);
         Log($"  planned in {total.Elapsed.TotalSeconds:0.0} s, {plan.Hydrology.Reaches.Count} river reaches");
+        if (riversOnly)
+        {
+            using var baked = JsonDocument.Parse(File.ReadAllText(Path.Combine(outDir, "world.json")));
+            var centre = baked.RootElement.GetProperty("region").GetProperty("centreInLandmass");
+            WriteRivers(plan, centre[0].GetDouble(), centre[1].GetDouble(), recipe.RegionSize, Path.Combine(outDir, "rivers.json"));
+            return 0;
+        }
 
         var (cx, cz) = recipe.RegionCenter is { Length: 2 } c ? (c[0], c[1]) : FindRegion(terrain, recipe.Profile.WorldSize, recipe.RegionSize);
         double x0 = cx - recipe.RegionSize / 2, z0 = cz - recipe.RegionSize / 2;
@@ -105,6 +115,7 @@ static class Program
             $"{100.0 * wet / samples:0.0}% water{(clipped > 0 ? $", {clipped} samples CLIPPED to the height range" : "")}");
 
         WritePreview(terrain, x0, z0, recipe.RegionSize, Path.Combine(outDir, "preview.png"));
+        WriteRivers(plan, cx, cz, recipe.RegionSize, Path.Combine(outDir, "rivers.json"));
         WriteOverview(terrain, recipe.Profile.WorldSize, x0, z0, recipe.RegionSize, Path.Combine(outDir, "overview.png"));
 
         var info = new
@@ -125,6 +136,37 @@ static class Program
         Settler.Run(outDir);
         Log($"Done in {total.Elapsed.TotalSeconds:0.0} s -> {outDir}");
         return 0;
+    }
+
+    /// <summary>
+    /// The rivers themselves, not just the grid they leave behind (Tom: "nothing like in River Game"): every reach in the
+    /// region as its centre line, in game coordinates (region centred on the origin), with the water surface, width and
+    /// depth at each point, resampled about every 4 m. The game carves smooth channels and builds River-style water
+    /// ribbons from these. Format: { reaches: [ { id, down, pts: [[x, z, surface, width, depth], ...] } ] }.
+    /// </summary>
+    static void WriteRivers(WorldPlan plan, double cx, double cz, double region, string path)
+    {
+        double half = region / 2 + 60;
+        var list = new List<object>();
+        int points = 0;
+        foreach (var r in plan.Hydrology.Reaches)
+        {
+            var run = new List<double[]>();
+            void Flush() { if (run.Count >= 3) { list.Add(new { id = r.Id, down = r.DownstreamReach, pts = run.ToArray() }); points += run.Count; } run = new List<double[]>(); }
+            double lastAlong = double.NegativeInfinity;
+            for (int i = 0; i < r.Points.Length; i++)
+            {
+                double x = r.Points[i].X - cx, z = r.Points[i].Z - cz;
+                if (Math.Abs(x) > half || Math.Abs(z) > half) { Flush(); lastAlong = double.NegativeInfinity; continue; }
+                double along = r.Along.Length > i ? r.Along[i] : i * 4;
+                if (along - lastAlong < 4 && i != r.Points.Length - 1) continue;
+                lastAlong = along;
+                run.Add(new[] { Math.Round(x, 2), Math.Round(z, 2), Math.Round(r.Surface[i], 3), Math.Round((double)r.Width[i], 2), Math.Round((double)r.Depth[i], 2) });
+            }
+            Flush();
+        }
+        File.WriteAllText(path, JsonSerializer.Serialize(new { format = "deadrecon.rivers/1", note = "game coordinates, metres; pts: x, z, surface, width, depth", reaches = list }));
+        Log($"  rivers: {list.Count} reaches, {points} points -> {Path.GetFileName(path)}");
     }
 
     static ushort Encode(double metres, ref long clipped)

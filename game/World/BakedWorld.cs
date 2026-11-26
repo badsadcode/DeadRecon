@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System;
 using System.IO;
 using System.Text.Json;
@@ -49,6 +50,7 @@ public sealed class BakedWorld
             w._water[tz * w.TilesPerSide + tx] = ReadTile(Path.Combine(dir, "tiles", $"w_{tx}_{tz}.r16"), w.TileSamples);
         }
         w.FillWaterHoles();
+        w.MarkRivers(RiverRibbons.Load(dir));
         return w;
     }
 
@@ -83,6 +85,37 @@ public sealed class BakedWorld
             foreach (var (gx, gz, v) in add) { SetWater(gx, gz, v); filled++; }
         }
         Godot.GD.Print($"[world] filled {filled} holes in the rivers ({clock.ElapsedMilliseconds} ms)");
+    }
+
+    private bool[] _river = Array.Empty<bool>();
+
+    /// <summary>Samples a river ribbon covers (RiverRibbons draws their water; the grid water leaves them out).</summary>
+    public bool IsRiver(int gx, int gz)
+    {
+        int n = SamplesPerSide;
+        return _river.Length > 0 && gx >= 0 && gz >= 0 && gx < n && gz < n && _river[gz * n + gx];
+    }
+
+    private void MarkRivers(List<RiverRibbons.Line> lines)
+    {
+        if (lines.Count == 0) return;
+        int n = SamplesPerSide;
+        _river = new bool[n * n];
+        foreach (var l in lines)
+            for (int i = 0; i < l.X.Length; i++)
+            {
+                float r = l.W[i] / 2 + 2.5f;
+                var (fx, fz) = ToSample(l.X[i], l.Z[i]);
+                int rr = (int)MathF.Ceiling(r / Spacing);
+                for (int dz = -rr; dz <= rr; dz++)
+                for (int dx = -rr; dx <= rr; dx++)
+                {
+                    int gx = (int)MathF.Round(fx) + dx, gz = (int)MathF.Round(fz) + dz;
+                    if (gx < 0 || gz < 0 || gx >= n || gz >= n) continue;
+                    float wx = SampleToWorld(gx) - l.X[i], wz = SampleToWorld(gz) - l.Z[i];
+                    if (wx * wx + wz * wz <= r * r) _river[gz * n + gx] = true;
+                }
+            }
     }
 
     private void SetWater(int gx, int gz, ushort v)
