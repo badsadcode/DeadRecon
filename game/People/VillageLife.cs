@@ -93,6 +93,7 @@ public partial class VillageLife : Node
                 if (d > FreeDistance)
                 {
                     foreach (var v in folk.People) v.QueueFree();
+                    Wildlife.Current?.FreeVillage(site.Index);
                     _folk.Remove(site.Index);
                 }
             }
@@ -106,6 +107,7 @@ public partial class VillageLife : Node
 
     private void Populate(Settlements.Site site, Villages.SiteLayout layout)
     {
+        Wildlife.Current?.PopulateVillage(site, layout);
         var folk = new Folk();
         _folk[site.Index] = folk;
         var rng = new RandomNumberGenerator { Seed = (ulong)site.Index * 31 + 7 };

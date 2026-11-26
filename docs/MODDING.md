@@ -12,6 +12,7 @@ Simple, on purpose: JSON files, no code. Change names, lines, items, weapons.
 | `weapons.json` | `weapons`: every gun (model, damage, rate of fire, magazine, spread, recoil, noise, sights, how often guards carry it) |
 | `names.json` | `operation_adjectives`, `operation_nouns`, `intel`, `soldier_names`, `lost_villager_names` |
 | `lines.json` | `guard_lines`, `guard_chats`, `villager_lines`, `radio_banter` |
+| (any file) | `animals`: BadZoo animals in villages and the wild (see `tools/animals/README.md`) |
 | (any file) | `buildings`: what you can build at home (`id`, `name`, `what`, `kind`: tent, wall, tower, crate, shelter, fire, lamp; `cost` in supplies, `hours` of work, `radius`) |
 
 You can edit these directly. To get fresh copies of everything the game knows:

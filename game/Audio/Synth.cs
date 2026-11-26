@@ -293,6 +293,48 @@ public static class Synth
     });
 
     /// <summary>A bird call: one of several species-ish patterns (whistle, trill, chirps, a two-note call).</summary>
+    /// <summary>Animal calls, made like the voices: a voiced source (pitch sweep) through a formant, plus breath.
+    /// kinds: bark, cluck, quack, oink, bleat, moo, growl, trumpet, yelp.</summary>
+    public static AudioStreamWav Animal(string kind, int variant) => Cached($"animal{kind}{variant}", () =>
+    {
+        var rng = new Random(kind.GetHashCode() * 31 + variant);
+        float v = 1 + (float)(rng.NextDouble() - .5) * .2f;
+        // (length, start Hz, end Hz, formant Hz, noise, repeats, gap)
+        var (len, f0, f1, formant, noise, reps, gap) = kind switch
+        {
+            "bark" => (.13f, 420f, 300f, 900f, .35f, 1 + rng.Next(2), .1f),
+            "cluck" => (.06f, 520f, 480f, 1400f, .25f, 2 + rng.Next(3), .07f),
+            "quack" => (.16f, 330f, 260f, 1100f, .45f, 1 + rng.Next(2), .12f),
+            "oink" => (.14f, 160f, 130f, 500f, .55f, 1 + rng.Next(2), .09f),
+            "bleat" => (.45f, 380f, 360f, 1000f, .2f, 1, 0f),
+            "moo" => (.9f, 130f, 105f, 420f, .15f, 1, 0f),
+            "growl" => (1.1f, 70f, 85f, 300f, .6f, 1, 0f),
+            "trumpet" => (.8f, 380f, 620f, 1500f, .3f, 1, 0f),
+            _ => (.18f, 900f, 600f, 1800f, .3f, 1, 0f),     // yelp
+        };
+        var bp = Biquad.BandPass(formant * v, 2.2f);
+        var lp = Biquad.LowPass(formant * 2.2f);
+        int one = (int)(Rate * len), gapN = (int)(Rate * gap);
+        var o = new float[(one + gapN) * reps + 200];
+        int at = 0;
+        for (int r = 0; r < reps; r++)
+        {
+            float ph = 0;
+            for (int i = 0; i < one; i++)
+            {
+                float t = i / (float)one;
+                float f = (f0 + (f1 - f0) * t) * v * (kind == "bleat" ? 1 + .06f * MathF.Sin(i / (float)Rate * 45) : 1);
+                ph += MathF.Tau * f / Rate;
+                float src = (ph / MathF.Tau % 1) * 2 - 1;                       // saw: buzzy, voice-like
+                float n = (float)rng.NextDouble() * 2 - 1;
+                float env = MathF.Min(1, t * 25) * MathF.Pow(1 - t, kind is "moo" or "trumpet" or "growl" ? .6f : 1.8f);
+                o[at + i] = (bp.Run(src * (1 - noise) + n * noise) * 2.4f + lp.Run(src) * .25f) * env;
+            }
+            at += one + gapN;
+        }
+        return ToWav(o, Rate, false, kind is "growl" or "moo" ? 1.4f : 1);
+    });
+
     public static AudioStreamWav Bird(int kind, int variant) => Cached($"bird{kind}_{variant}", () =>
     {
         var rng = new Random(kind * 100 + variant);

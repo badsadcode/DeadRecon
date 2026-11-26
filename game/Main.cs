@@ -38,6 +38,7 @@ public partial class Main : Node3D
 	private Villages _villages = null!;
 	private Rocks? _rocks;
 	private DeadRecon.People.Squad? _squadNode;
+	private DeadRecon.People.Wildlife? _wildlife;
 	private DeadRecon.Gear.Kit _kit = null!;
 	private DeadRecon.UI.KitScreen _kitScreen = null!;
 	private DeadRecon.AI.Patrols? _patrols;
@@ -73,7 +74,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -158,6 +159,8 @@ public partial class Main : Node3D
 		AddChild(new DeadRecon.Base.HomeBase { Player = _walker, World = _world });
 		_squadNode = new DeadRecon.People.Squad { Player = _walker, World = _world, OnOperation = op != Mission.Op.None };
 		AddChild(_squadNode);
+		_wildlife = new DeadRecon.People.Wildlife { Player = _walker, World = _world, Towns = _towns };
+		AddChild(_wildlife);
 		AddChild(new DeadRecon.Base.Structures { Player = _walker, World = _world });
 		_rocks = new Rocks { World = _world, Viewer = _walker };
 		AddChild(_rocks);
@@ -360,6 +363,7 @@ public partial class Main : Node3D
 		string baseTest = Arg("basetest", "");
 		if (baseTest != "") _ = RunBaseTest(baseTest);
 		if (Arg("risktest", "") != "") _ = RunRiskTest();
+		if (Arg("zootest", "") != "") _ = RunZooTest(Arg("zootest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -911,6 +915,71 @@ public partial class Main : Node3D
 			for (int f = 0; f < 4; f++) await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
 			vp.GetTexture().GetImage().SavePng(Path.Combine(dir, $"view{k++}.png"));
 		}
+		GetTree().Quit();
+	}
+
+	/// <summary>Animals: the nearest village's dogs and livestock, then wildlife beside you, then a gunshot.</summary>
+	private async Task RunZooTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[zoo] shot {name}");
+		}
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 9.5f;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		var start = _walker.GlobalPosition;
+		var village = _towns.Sites.Where(s => s.Kind == "village").OrderBy(s => s.Centre.DistanceTo(start)).First();
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = village.Centre + new Vector3(-14, 6, 12);
+		for (int f = 0; f < 2400 && (_life.Population == 0 || _trees.Pending > 0 || !_terrain.Settled); f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		await Seconds(6);
+		var tame = DeadRecon.People.Animal.All.Where(a => a.Site == village.Index).ToList();
+		GD.Print($"[zoo] {village.Name}: {tame.Count} animals: {string.Join(", ", tame.GroupBy(a => a.Def.Id).Select(g => $"{g.Count()} {g.Key}"))}");
+		LookAt(village.Centre);
+		await Shot("1_village_animals");
+		var dog = tame.FirstOrDefault(a => a.Def.Role == "dog");
+		if (dog != null)
+		{
+			_walker.SetFlying(false);
+			_walker.GlobalPosition = dog.GlobalPosition + new Vector3(4, 1, 4);
+			await Seconds(3);
+			LookAt(dog.GlobalPosition + Vector3.Up * .4f);
+			await Shot("2_dog_close");
+		}
+		// Wildlife, right here.
+		var spot = village.Centre + new Vector3(80, 0, -80);
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = spot + new Vector3(0, 30, 0);
+		for (int f = 0; f < 900 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(spot)); f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = spot with { Y = _world.HeightAt(spot.X, spot.Z) + 1 };
+		var deer = _wildlife!.TestSpawn("deer", spot + new Vector3(0, 0, -45), 2);
+		var boar = _wildlife.TestSpawn("boar", spot + new Vector3(-6, 0, -30), 3);
+		var eleph = _wildlife.TestSpawn("elephant", spot + new Vector3(14, 0, -60), 1);
+		var tiger = _wildlife.TestSpawn("tiger", spot + new Vector3(9, 0, -22), 1);
+		_walker.Crouching.ToString();
+		await Seconds(1.5);
+		LookAt(deer[0].GlobalPosition + Vector3.Up * .8f);
+		_walker.Camera.Fov = 40;
+		await Shot("3_wildlife");
+		var before = deer[0].GlobalPosition;
+		DeadRecon.Combat.Hearing.Make(_walker.GlobalPosition, DeadRecon.Combat.Hearing.Gunshot, _walker);
+		await Seconds(1.2);
+		await Shot("4_scatter");
+		await Seconds(3);
+		GD.Print($"[zoo] after a gunshot the deer ran {before.DistanceTo(deer[0].GlobalPosition):0} m; tiger {(tiger[0].Dead ? "dead" : "alive")} at {tiger[0].GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m");
+		GD.Print($"[zoo] animals in the world: {DeadRecon.People.Animal.All.Count}");
 		GetTree().Quit();
 	}
 
