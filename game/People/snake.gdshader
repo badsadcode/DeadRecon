@@ -16,6 +16,7 @@ uniform vec3 belly_color : source_color = vec3(0.75, 0.7, 0.5);
 uniform int pattern = 0;          // 0 plain, 1 bands, 2 diamonds (back), 3 net (python)
 uniform float pattern_scale = 14.0;
 uniform float wet : hint_range(0.0, 1.0) = 0.0;
+uniform float ground[16];        // ground height (relative to the head) at 16 points down the body, from the script
 
 varying float t;
 varying float around;
@@ -44,6 +45,10 @@ void vertex() {
 	float neck = smoothstep(0.03, 0.07, t) * (1.0 - smoothstep(0.12, 0.2, t));
 	VERTEX.x *= 1.0 + hood * neck * 3.2;
 	VERTEX.y *= 1.0 - hood * neck * 0.35;
+	// Lie on the ground: each part of the body follows the slope under it.
+	float gi = t * 15.0;
+	int i0 = int(floor(gi));
+	VERTEX.y += mix(ground[i0], ground[min(i0 + 1, 15)], fract(gi));
 }
 
 float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * 0.1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }

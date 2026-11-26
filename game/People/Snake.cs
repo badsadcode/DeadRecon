@@ -174,13 +174,14 @@ public partial class Snake : Node3D, IDamageable
         _mat.SetShaderParameter("rear", _rear);
         _mat.SetShaderParameter("hood", _hood);
         _mat.SetShaderParameter("strike", _strike);
+        Drape();
         _mat.SetShaderParameter("wet", DeadRecon.World.Weather.Current?.Wetness ?? 0);
         // The head (where the shader puts it).
         var L = Def.Length;
         // Same maths as the shader's rearing, at the head (t = 0).
         const float F = .24f;
         float hu = 1 - .05f / F, lift = _rear;
-        _eyes.Position = new Vector3(0, lift * hu * F * L * .85f, lift * (-F * L * (1 - .25f * hu) + .05f * L) + _strike * L * .35f);
+        _eyes.Position = new Vector3(0, _ground[0] + lift * hu * F * L * .85f, lift * (-F * L * (1 - .25f * hu) + .05f * L) + _strike * L * .35f);
         // The tongue flicks now and then (more when it's tasting the air for you).
         _tongueT -= dt;
         if (_tongueT <= 0) _tongueT = threatened ? _rng.RandfRange(.4f, 1) : _rng.RandfRange(2, 6);
@@ -190,6 +191,23 @@ public partial class Snake : Node3D, IDamageable
 
     /// <summary>Tests: slither over there.</summary>
     public void TestGo(Vector3 goal) { _goal = goal; _moving = true; _think = 30; }
+
+    private readonly float[] _ground = new float[16];
+
+    /// <summary>Ground height under 16 points down the body (same bends as the shader), so it lies on slopes
+    /// instead of sticking out of them. A touch below, so it sits in the leaf litter.</summary>
+    private void Drape()
+    {
+        float L = Def.Length, squash = Mathf.Lerp(1, .62f, _coil * (1 - _slither)), y0 = GlobalPosition.Y;
+        for (int k = 0; k < 16; k++)
+        {
+            float t = k / 15f, body = Mathf.SmoothStep(0, .18f, t);
+            float x = (MathF.Sin(t * 9 - _phase) * .11f * _slither + MathF.Sin(t * 7.5f + .6f) * .16f * _coil * (1 - _slither)) * L * body;
+            var w = ToGlobal(new Vector3(x, 0, -t * L * squash));
+            _ground[k] = World.HeightAt(w.X, w.Z) - y0 - Def.Radius * .3f;
+        }
+        _mat.SetShaderParameter("ground", _ground);
+    }
 
     private void Face(Vector3 at, float rate)
     {
