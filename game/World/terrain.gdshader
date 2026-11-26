@@ -98,8 +98,10 @@ void fragment() {
 	// ---- photo textures (already linear via source_color)
 	vec2 uv = p / tile_metres;
 	vec3 floor_c = mix(untiled(loam_tex, uv), untiled(litter_tex, uv * 0.9 + 0.5), smoothstep(0.35, 0.7, broad));
-	float moss_mask = smoothstep(0.55, 0.8, noise(p * 0.11 + 7.0)) * flatness;
-	floor_c = mix(floor_c, untiled(moss_tex, uv * 1.1), moss_mask * 0.85);
+	// Jungle floor is mostly green (Tom: "I always thought Vietnam would be greener, not rusty brown"): creeping
+	// groundcover over most of it, bare leaf litter in patches and under the densest shade.
+	float moss_mask = smoothstep(0.28, 0.6, noise(p * 0.11 + 7.0) * 0.7 + noise(p * 0.43 + 2.0) * 0.3) * mix(0.55, 1.0, flatness);
+	floor_c = mix(floor_c, untiled(moss_tex, uv * 1.1), moss_mask * 0.9);
 	vec3 rock_c = triplanar(rock_tex, world_pos / rock_metres, world_normal);
 	vec3 mud_c = mix(untiled(mud_tex, uv * 0.8), floor_c, 0.45); // laterite, muted into the soil
 	vec3 pebble_c = untiled(pebble_tex, uv * 1.4);
@@ -126,12 +128,13 @@ void fragment() {
 	// Pull the orange out: the leaf-litter photo is very saturated orange-brown ("rusty bucket" in playtest).
 	float luma = dot(t, vec3(0.3, 0.59, 0.11));
 	t = mix(vec3(luma), t, 0.72) * vec3(0.97, 1.0, 0.98);
+	t = mix(t, t * vec3(0.86, 1.04, 0.8), (1.0 - road) * (1.0 - yard) * (1.0 - rock_w));   // olive, not rust (not the red roads)
 
 	// Hue drift: slow patches of warmer/redder and greener/yellower ground, so the floor isn't one carpet.
 	float hue_a = noise(p * 0.017 + 91.0), hue_b = noise(p * 0.061 + 13.0);
 	vec3 warm = t * vec3(1.05, 0.98, 0.92), green = t * vec3(0.92, 1.07, 0.88), yellow = t * vec3(1.03, 1.03, 0.88);
-	t = mix(t, warm, smoothstep(0.55, 0.85, hue_a) * 0.7);
-	t = mix(t, green, smoothstep(0.55, 0.85, 1.0 - hue_a) * 0.6 * flatness);
+	t = mix(t, warm, smoothstep(0.7, 0.92, hue_a) * 0.5);
+	t = mix(t, green, smoothstep(0.35, 0.8, 1.0 - hue_a) * 0.8 * flatness);
 	t = mix(t, yellow, smoothstep(0.6, 0.9, hue_b) * 0.4);
 
 	// Loft: the textures' own brightness as height. Dark gaps between leaves and stones sink in (darker, occluded)

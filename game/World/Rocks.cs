@@ -19,6 +19,10 @@ public partial class Rocks : Node3D
     private readonly ArrayMesh[] _meshes = new ArrayMesh[Variants];
     private readonly Shape3D[] _shapes = new Shape3D[Variants];
     private ShaderMaterial _material = null!;
+    // Rock formations from Thornwake's rock kit (RockKit.cs): many crisp pieces each, in metres.
+    private readonly ArrayMesh[] _formations = new ArrayMesh[RockKit.Kinds * RockKit.Variants];
+    private readonly RockKit.Piece[][] _formationPieces = new RockKit.Piece[RockKit.Kinds * RockKit.Variants][];
+    public int Formations { get; private set; }
     private readonly Dictionary<(int, int), Node3D> _cells = new();
     private double _since = 1;
     public int Count { get; private set; }
@@ -50,6 +54,23 @@ public partial class Rocks : Node3D
             _meshes[v].SurfaceSetMaterial(0, _material);
             _shapes[v] = _meshes[v].CreateConvexShape(true, true);
         }
+        var clock = System.Diagnostics.Stopwatch.StartNew();
+        for (int k = 0; k < RockKit.Kinds; k++)
+            for (int v = 0; v < RockKit.Variants; v++)
+            {
+                var ((verts, normals, cols), pieces) = RockKit.Build((RockKit.Kind)k, v);
+                var arrays = new Godot.Collections.Array();
+                arrays.Resize((int)Mesh.ArrayType.Max);
+                arrays[(int)Mesh.ArrayType.Vertex] = verts;
+                arrays[(int)Mesh.ArrayType.Normal] = normals;
+                arrays[(int)Mesh.ArrayType.Color] = cols;
+                var mesh = new ArrayMesh();
+                mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+                mesh.SurfaceSetMaterial(0, _material);
+                _formations[k * RockKit.Variants + v] = mesh;
+                _formationPieces[k * RockKit.Variants + v] = pieces;
+            }
+        GD.Print($"[rocks] {_formations.Length} rock formations built in {clock.ElapsedMilliseconds} ms");
     }
 
     public override void _Process(double delta)
@@ -147,6 +168,7 @@ public partial class Rocks : Node3D
                 colours[v].Add(new Color(tone + warm, tone, tone - warm));
                 body.AddChild(new CollisionShape3D { Shape = _shapes[v], Transform = xf });
             }
+        PlantFormations(ci, cj, cell, body, towns);
         int count = 0;
         for (int v = 0; v < Variants; v++)
         {
@@ -159,6 +181,80 @@ public partial class Rocks : Node3D
         Count += count;
         cell.TreeExiting += () => Count -= count;
         return cell;
+    }
+
+    private static float Smooth(float x, float z, float scale, uint seed)
+    {
+        float fx = x / scale, fz = z / scale;
+        int ix = (int)MathF.Floor(fx), iz = (int)MathF.Floor(fz);
+        float u = fx - ix, v = fz - iz;
+        u = u * u * (3 - 2 * u); v = v * v * (3 - 2 * v);
+        float a = Unit(Hash(ix, iz, seed)), b = Unit(Hash(ix + 1, iz, seed)), c = Unit(Hash(ix, iz + 1, seed)), d = Unit(Hash(ix + 1, iz + 1, seed));
+        return (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v;
+    }
+
+    /// <summary>Rock formations (after Thornwake, D277): one chance every 32 m, mostly where the outcrop noise is high
+    /// (whole rocky districts, ~500 m), more on crests and hillsides, a lone one now and then. Limestone country: tors,
+    /// slab stacks and tiered piles; columns on high, steep ground. Leaning a third of the way with the slope, sunk in.</summary>
+    private void PlantFormations(int ci, int cj, Node3D cell, StaticBody3D body, Settlements? towns)
+    {
+        const float Grid = 32;
+        int n = (int)(CellSize / Grid);
+        float x0 = ci * CellSize - World.Half, z0 = cj * CellSize - World.Half;
+        int formed = 0;
+        for (int b = 0; b < n; b++)
+            for (int a = 0; a < n; a++)
+            {
+                int gxk = ci * n + a, gzk = cj * n + b;
+                float x = x0 + (a + .15f + .7f * Unit(Hash(gxk, gzk, 21))) * Grid, z = z0 + (b + .15f + .7f * Unit(Hash(gxk, gzk, 22))) * Grid;
+                if (Math.Abs(x) > World.Half - 20 || Math.Abs(z) > World.Half - 20) continue;
+                var (fx, fz) = World.ToSample(x, z);
+                int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
+                if (World.IsWet(gx, gz) || World.NearWater(gx, gz, 2)) continue;
+                float dx = World.Ground(gx + 1, gz) - World.Ground(gx - 1, gz), dz = World.Ground(gx, gz + 1) - World.Ground(gx, gz - 1);
+                var normal = new Vector3(-dx, 2 * World.Spacing, -dz).Normalized();
+                if (normal.Y < .8f) continue;                                    // too steep to stand on
+                float outcrop = Math.Clamp((Smooth(x, z, 520, 71) * .7f + Smooth(x, z, 170, 72) * .3f - .52f) / .14f, 0, 1);
+                float h = World.HeightAt(x, z), round = 0;
+                for (int k = 0; k < 4; k++) round += World.HeightAt(x + 35 * MathF.Cos(k * MathF.PI / 2), z + 35 * MathF.Sin(k * MathF.PI / 2));
+                float crest = Math.Clamp((h - round / 4) / 6, -1, 1);
+                float chance = (.012f + .5f * outcrop * (1 + .8f * crest)) * (crest < -.3f ? .3f : 1) * (1.6f - normal.Y);
+                if (Unit(Hash(gxk, gzk, 23)) > chance) continue;
+                if (TreeScatter.InClearing(x, z, 6)) continue;
+                if (towns != null && (towns.KeepClear(x, z, 12) || towns.YardAt(x, z) > .01f)) continue;
+                if (DeadRecon.Base.HomeBase.Position is { } home && new Vector2(x - home.X, z - home.Z).Length() < DeadRecon.Base.HomeBase.Radius + 15) continue;
+                float roll = Unit(Hash(gxk, gzk, 24));
+                bool high = crest > .3f || normal.Y < .9f;
+                var kind = high ? (roll < .55f ? RockKit.Kind.Columns : RockKit.Kind.Tiered)
+                         : roll < .45f ? RockKit.Kind.Tor : roll < .75f ? RockKit.Kind.Slabs : RockKit.Kind.Tiered;
+                int index = (int)kind * RockKit.Variants + (int)(Hash(gxk, gzk, 25) % RockKit.Variants);
+                float s = (.55f + .55f * Unit(Hash(gxk, gzk, 26)) * Unit(Hash(gxk, gzk, 27))) * (.75f + .35f * outcrop + .15f * Math.Max(0, crest));
+                var lean = new Basis(Vector3.Up.Cross(normal).LengthSquared() > 1e-6f ? Vector3.Up.Cross(normal).Normalized() : Vector3.Right, Vector3.Up.AngleTo(normal) * .35f);
+                var rot = lean * new Basis(Vector3.Up, Unit(Hash(gxk, gzk, 28)) * MathF.Tau);
+                var at = new Vector3(x, h - (.6f + 6f * (1 - normal.Y)) * s, z);
+                var xf = new Transform3D(rot.Scaled(new Vector3(s, s, s)), at);
+                cell.AddChild(new MeshInstance3D { Mesh = _formations[index], Transform = xf });
+                // Collision: its pieces as boxes (scaled into the box size: physics dislikes scaled shapes).
+                foreach (var piece in _formationPieces[index])
+                    body.AddChild(new CollisionShape3D
+                    {
+                        Shape = new BoxShape3D { Size = piece.Half * 2 * s },
+                        Transform = new Transform3D(rot * piece.Basis, xf * piece.Centre),
+                    });
+                formed++;
+            }
+        Formations += formed;
+        if (formed > 0) cell.TreeExiting += () => Formations -= formed;
+    }
+
+    /// <summary>Tests: the nearest rock formation's position.</summary>
+    public Vector3? NearestFormation(Vector3 p)
+    {
+        Vector3? best = null;
+        foreach (var cell in _cells.Values)
+            foreach (var child in cell.GetChildren())
+                if (child is MeshInstance3D mi && (best == null || mi.GlobalPosition.DistanceTo(p) < best.Value.DistanceTo(p))) best = mi.GlobalPosition;
+        return best;
     }
 
     // ================================================================= making them

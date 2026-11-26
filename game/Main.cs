@@ -74,7 +74,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -365,6 +365,7 @@ public partial class Main : Node3D
 		if (Arg("risktest", "") != "") _ = RunRiskTest();
 		if (Arg("zootest", "") != "") _ = RunZooTest(Arg("zootest", ""));
 		if (Arg("snaketest", "") != "") _ = RunSnakeTest(Arg("snaketest", ""));
+		if (Arg("rocktest", "") != "") _ = RunRockTest(Arg("rocktest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -920,6 +921,61 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Animals: the nearest village's dogs and livestock, then wildlife beside you, then a gunshot.</summary>
+	/// <summary>Photos: the jungle floor (is it green?), then Thornwake's rock formations, wherever the nearest ones are.</summary>
+	private async Task RunRockTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[rocks] shot {name}");
+		}
+		async Task Settle(Vector3 at)
+		{
+			for (int f = 0; f < 2400 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(at)); f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+			await Seconds(2.5);
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10f;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		var cam = new Camera3D { Fov = 60, Near = .05f };
+		AddChild(cam);
+		void Frame(Vector3 from, Vector3 at, float fov) { cam.GlobalPosition = from; cam.LookAt(at); cam.Fov = fov; cam.MakeCurrent(); }
+		float H(float x, float z) => _world.HeightAt(x, z);
+		var start = _walker.GlobalPosition;
+		await Settle(start);
+		// The floor, looking along it and from a little above.
+		Frame(start + new Vector3(0, 1.7f, 0), new Vector3(start.X + 10, H(start.X + 10, start.Z - 14), start.Z - 14), 60);
+		await Shot("1_floor");
+		Frame(start + new Vector3(0, 14, 10), new Vector3(start.X, H(start.X, start.Z - 25), start.Z - 25), 60);
+		await Shot("2_floor_above");
+		// Formations: the nearest few, searching further out until there are some.
+		int shots = 0;
+		var seen = new System.Collections.Generic.List<Vector3>();
+		for (int ring = 0; ring < 10 && shots < 3; ring++)
+		{
+			var probe = start + new Vector3(MathF.Cos(ring * 1.3f) * ring * 220, 0, MathF.Sin(ring * 1.3f) * ring * 220);
+			probe.Y = H(probe.X, probe.Z) + 2;
+			_walker.SetFlying(true);
+			_walker.GlobalPosition = probe;
+			await Settle(probe);
+			GD.Print($"[rocks] probe {ring}: {_rocks!.Formations} formations, {_rocks.Count} rocks nearby");
+			if (_rocks.NearestFormation(probe) is not { } f || seen.Exists(v => v.DistanceTo(f) < 30)) continue;
+			seen.Add(f);
+			var from = f + new Vector3(9, 0, 11);
+			from.Y = Math.Max(H(from.X, from.Z), f.Y) + 3.5f;
+			_walker.GlobalPosition = from;
+			await Settle(from);
+			Frame(from, f + Vector3.Up * 1.5f, 60);
+			await Shot($"{3 + shots}_formation");
+			shots++;
+		}
+		GetTree().Quit();
+	}
+
 	private async Task RunSnakeTest(string dir)
 	{
 		Directory.CreateDirectory(dir);
