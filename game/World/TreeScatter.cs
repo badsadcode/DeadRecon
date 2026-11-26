@@ -60,6 +60,9 @@ public partial class TreeScatter : Node3D
         foreach (var m in TreeShaders) m.SetShaderParameter("wind", strength);
     }
 
+    /// <summary>Tests: no wind movement at all (has_wind off).</summary>
+    public void SetPhaseFrozen(bool frozen) { foreach (var m in TreeShaders) m.SetShaderParameter("has_wind", !frozen); }
+
     public void SetWetness(float wet)
     {
         foreach (var m in TreeShaders) m.SetShaderParameter("wet", wet);
@@ -139,6 +142,10 @@ public partial class TreeScatter : Node3D
     public override void _Ready()
     {
         Current = this;
+        // (Cleared BEFORE loading: they were cleared after, so the weather never reached the trees' materials: wet
+        // leaves never darkened and the wind strength never changed. Found 27 Nov, chasing Tom's flashing leaves.)
+        WetMaterials.Clear();
+        TreeShaders.Clear();
         for (int v = 1; v <= 99; v++)
         {
             var lods = new ArrayMesh[LodUntil.Length];
@@ -154,8 +161,6 @@ public partial class TreeScatter : Node3D
             _trunkRadius.Add(MeasureTrunk(lods[0], .4f, 1.8f, .85f));
             _footRadius.Add(MeasureTrunk(lods[0], .02f, .45f, .7f));
         }
-        WetMaterials.Clear();
-        TreeShaders.Clear();
         Foliage.TrunkHit += OnTrunkHit;
         if (_variants.Count == 0) GD.PushWarning("No trees found in res://assets/trees (Jungle_tree_NN_LODn.glb). The jungle will be bald.");
         _cellsPerSide = (int)MathF.Ceiling(World.Size / CellSize);

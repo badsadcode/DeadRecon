@@ -1438,6 +1438,34 @@ public partial class Main : Node3D
 		cam.MakeCurrent();
 		await Seconds(1);
 		await Shot("1_breeze_a"); await Seconds(.7); await Shot("1_breeze_b");
+		// Flicker probe: two frames 1/20 s apart, with the sun's shadows on and off, wind on and off.
+		var sunL = GetTree().Root.FindChildren("*", nameof(DirectionalLight3D), true, false).OfType<DirectionalLight3D>().First();
+		foreach (var (tag, shadows, still) in new[] { ("shadow_wind", true, false), ("noshadow_wind", false, false), ("shadow_still", true, true) })
+		{
+			sunL.ShadowEnabled = shadows;
+			_trees.SetWind(still ? 0 : .6f);
+			_trees.SetPhaseFrozen(still);
+			await Seconds(.6);
+			await Shot($"f_{tag}_a"); await Seconds(.05); await Shot($"f_{tag}_b");
+		}
+		// Still trees, one effect off at a time.
+		var env = GetTree().Root.FindChildren("*", nameof(WorldEnvironment), true, false).OfType<WorldEnvironment>().First().Environment;
+		var post = GetTree().Root.FindChildren("*", nameof(MeshInstance3D), true, false).OfType<MeshInstance3D>()
+			.FirstOrDefault(m => m.MaterialOverride is ShaderMaterial sm && sm.Shader?.ResourcePath.EndsWith("post.gdshader") == true);
+		_trees.SetPhaseFrozen(true);
+		foreach (var tag in new[] { "still_base", "still_nofog", "still_nopost", "still_nossao", "still_noglow", "still_noall" })
+		{
+			env.VolumetricFogEnabled = tag is not ("still_nofog" or "still_noall");
+			if (post != null) post.Visible = tag is not ("still_nopost" or "still_noall");
+			env.SsaoEnabled = tag is not ("still_nossao" or "still_noall");
+			env.SsilEnabled = env.SsilEnabled && tag != "still_noall";
+			env.GlowEnabled = tag is not ("still_noglow" or "still_noall");
+			await Seconds(.8);
+			await Shot($"f_{tag}_a"); await Seconds(.05); await Shot($"f_{tag}_b");
+		}
+		GD.Print($"[wind] post pass found: {post != null}; ssil {env.SsilEnabled}; sdfgi {env.SdfgiEnabled}");
+		env.VolumetricFogEnabled = DeadRecon.UI.Settings.LightShafts; env.SsaoEnabled = true; env.GlowEnabled = true; if (post != null) post.Visible = true;
+		sunL.ShadowEnabled = true; _trees.SetPhaseFrozen(false);
 		_weather.SetNow(Weather.Kind.Storm);
 		await Seconds(3);
 		await Shot("2_storm_a"); await Seconds(.7); await Shot("2_storm_b");

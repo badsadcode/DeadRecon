@@ -57,7 +57,11 @@ void fragment() {
 		if (on_screen * facing > 0.001) {
 			const int N = 40;
 			vec2 stepv = to_sun / float(N);
-			float jitter = hash(uv * 1000.0 + TIME);
+			// A fixed offset per pixel (interleaved gradient noise) hides the banding of 40 steps. It used to change every
+			// frame (+TIME): at every leaf edge against the sky the march then hit sky one frame and leaf the next, and
+			// the canopy shimmered (Tom: "the trees are flashing", 27 Nov).
+			vec2 px = FRAGCOORD.xy;
+			float jitter = fract(52.9829189 * fract(dot(px, vec2(0.06711056, 0.00583715))));
 			vec2 p = uv + stepv * jitter;
 			float light = 0.0, decay = 1.0;
 			for (int i = 0; i < N; i++) {

@@ -12,8 +12,10 @@ vec3 tree_wind(vec3 v, vec3 n, vec2 bend_flutter, vec2 phase_sway, vec3 inst, fl
 	// Branches: bow and bob, each at its own phase.
 	float bp = t * (1.6 + 0.4 * s) + phase * 6.2832 + seed;
 	off += (d * sin(bp) * 0.12 + vec3(0.0, 0.05, 0.0) * sin(bp * 1.3 + 1.0)) * bend * (0.3 + s);
-	// Leaf tips: a quick shiver along the leaf's normal.
-	float fp = t * (7.0 + 5.0 * s) + phase * 40.0 + v.y * 2.0 + seed;
-	off += n * flutter * (0.012 + 0.03 * s) * sin(fp);
+	// Leaf tips: a gentle flutter, sideways in the wind. (Not along the normal: NoorForm's crown normals point out of
+	// the crown, so that pushed every leaf in and out through its neighbours' shadows, and the crowns flickered.)
+	float fp = t * (2.6 + 1.6 * s) + phase * 40.0 + v.y * 0.7 + seed;
+	vec3 side = vec3(-d.z, 0.0, d.x);
+	off += (side * sin(fp) + vec3(0.0, 0.5, 0.0) * sin(fp * 1.37 + 0.8)) * flutter * (0.004 + 0.012 * s);
 	return off;
 }
