@@ -275,7 +275,8 @@ public partial class Main : Node3D
 		};
 
 		// Player HUD (the debug text above is F3) and the Esc menu.
-		layer.AddChild(new DeadRecon.UI.Hud { Player = _walker, Rifle = _weapon, Mission = _mission, Weather = _weather });
+		// (--clean=1: photo runs for the devlog, no HUD or debug text)
+		layer.AddChild(new DeadRecon.UI.Hud { Player = _walker, Rifle = _weapon, Mission = _mission, Weather = _weather, Visible = Arg("clean", "") == "" });
 		// Tab: the kit screen (backpack and gunsmith), above the HUD.
 		var kitLayer = new CanvasLayer { Layer = 5 };
 		AddChild(kitLayer);
@@ -297,7 +298,7 @@ public partial class Main : Node3D
 		_menu = new DeadRecon.UI.PauseMenu { Walker = _walker };
 		_menu.Changed += () => _hud.Visible = DeadRecon.UI.Settings.ShowDebug;
 		AddChild(_menu);
-		_hud.Visible = DeadRecon.UI.Settings.ShowDebug || testing;
+		_hud.Visible = (DeadRecon.UI.Settings.ShowDebug || testing) && Arg("clean", "") == "";
 
 		string shots = Arg("shots", "");
 		if (shots != "") _ = TakeShots(shots);
