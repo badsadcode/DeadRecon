@@ -62,7 +62,10 @@ public partial class Main : Node3D
 		layer.AddChild(_hud);
 		AddChild(layer);
 
-		string dir = ProjectSettings.GlobalizePath($"res://world/{Arg("world", "jungle")}");
+		// The baked world: the project's world/ folder when run from the project, or world/ next to the EXE.
+		string dir = OS.HasFeature("editor") || OS.HasFeature("template") == false
+			? ProjectSettings.GlobalizePath($"res://world/{Arg("world", "jungle")}")
+			: Path.Combine(Path.GetDirectoryName(OS.GetExecutablePath())!, "world", Arg("world", "jungle"));
 		if (!File.Exists(Path.Combine(dir, "world.json")))
 		{
 			_hud.Text = $"No baked world at {dir}\nBake it first:\n  dotnet run -c Release --project tools/WorldBaker -- content/world/jungle.world.json";
