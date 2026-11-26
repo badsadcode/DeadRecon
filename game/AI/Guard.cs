@@ -57,6 +57,8 @@ public partial class Guard : CharacterBody3D, IDamageable
     private bool _peeking, _hurry;
     private float _coverTimer, _coverCheck;
     private readonly HashSet<Guard> _bodiesSeen = new();
+    /// <summary>A saved operation coming back: old bodies are old news.</summary>
+    public void AlreadySaw(Guard body) => _bodiesSeen.Add(body);
     private Vector3? _flankPoint;
     private float _flankTime, _sitTimer = 20, _sitting;
     private Vector3 _lastVel;

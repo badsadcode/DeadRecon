@@ -38,7 +38,7 @@ public partial class PauseMenu : CanvasLayer
         box.AddChild(title);
 
         Button(box, "Resume", Close);
-        Button(box, "New operation", () => { Close(); GetTree().ReloadCurrentScene(); });
+        Button(box, "New operation", () => { Close(); DeadRecon.Missions.OperationSave.Clear(); GetTree().ReloadCurrentScene(); });
 
         box.AddChild(new HSeparator());
         var diff = new OptionButton();
@@ -75,7 +75,12 @@ public partial class PauseMenu : CanvasLayer
         Check(box, "Show debug info (F3)", Settings.ShowDebug, v => Settings.ShowDebug = v);
 
         box.AddChild(new HSeparator());
-        Button(box, "Quit to desktop", () => GetTree().Quit());
+        Button(box, "Quit to desktop", () =>
+        {
+            // Mid-operation: saved if it's safe; otherwise you carry on from the last safe moment.
+            DeadRecon.Missions.Mission.Current?.SaveIfSafe();
+            GetTree().Quit();
+        });
         var help = new Label
         {
             Text = "WASD move · Shift run · hold C / Alt toggle crouch · Space jump · Q/E lean · C while sprinting slide · LMB fire · RMB scope (Shift: hold breath) · R reload · V semi/auto · F (hold) take · N weather · T ground look",

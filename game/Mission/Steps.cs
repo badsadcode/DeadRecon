@@ -16,6 +16,9 @@ public partial class Mission
     public abstract class Step
     {
         public Mission M = null!;
+        /// <summary>What finishing this step changed in the world (not your kit, that's saved already): redone when a
+        /// saved operation comes back past it.</summary>
+        public Action? Replay;
         /// <summary>The objective line (without distance and step count).</summary>
         public abstract string Text { get; }
         /// <summary>The word over the marker ("CACHE"), or "" for no marker.</summary>

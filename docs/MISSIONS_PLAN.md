@@ -263,7 +263,11 @@ Each step is playable on its own.
    `game/Mission/Steps.cs` has the steps (hold F, kill, search a body, fuse, talk into following, go to, get out,
    set up the radio); each operation is a list of them in `Mission.Recipe()`. People you bring out are escorts: if
    one dies the operation fails. A new mission = its props + a new list.
-2. **Save anywhere (safe):** save and continue an operation, with world state, squad and progress.
+2. **Save anywhere (safe):** save and continue an operation, with world state, squad and progress. **Done (2026-11-26):**
+   `game/Mission/OperationSave.cs`. Autosaves every 30 s and after each step when it's safe (nobody hunting you, no
+   fuse burning); quitting or closing the window saves if safe. On start, a saved operation comes back first: same
+   camp (kind + seed + where it was planned from), you where you stood, the hour, the step, the dead where they fell,
+   escorts following. Steps carry a `Replay` for their mark on the world.
 3. **Going down and being rescued** (wound levels, crawling, calling for help; squad, villagers and medic come for
    you). Lays the co-op rule's foundation.
 4. **Ten new missions:**

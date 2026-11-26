@@ -60,6 +60,12 @@ public partial class Mission : Node3D
     public Step? Now => State is Phase.Intel or Phase.Extract && StepIndex < Steps.Count ? Steps[StepIndex] : null;
     /// <summary>People you're bringing out: if one dies, the operation fails; you can't finish without them.</summary>
     public readonly List<(Villager V, string Name)> Escorts = new();
+    public int Seed { get; private set; }
+    /// <summary>Where the operation was planned from (the camp is picked around it): a saved operation needs it back.</summary>
+    public Vector3 PlannedFrom { get; private set; }
+    private int _campGuards;
+    private float _saveIn = 20;
+    private bool _stepSave;
     private float _reinforceIn = -1;
     public int Reinforcements { get; private set; }
     /// <summary>Hour the operation starts (set by the scene from the seed).</summary>
@@ -137,6 +143,7 @@ public partial class Mission : Node3D
     public void Plan(int seed, Vector3 spawn, Op kind = Op.Intel)
     {
         Current = this;
+        Seed = seed; PlannedFrom = spawn;
         Kind = kind;
         OperationName = NameFor(seed);
         _rng = new RandomNumberGenerator { Seed = (ulong)seed * 7 + 1 };
@@ -227,7 +234,8 @@ public partial class Mission : Node3D
         BuildCamp();
         if (!ExtractHome) BuildLandingZone();
         foreach (var step in Recipe()) { step.M = this; Steps.Add(step); }
-        Player.Died += () => { if (State is Phase.Intel or Phase.Extract) State = Phase.Failed; ShowPanel(); };
+        _campGuards = Guards.Count;
+        Player.Died += () => { if (State is Phase.Intel or Phase.Extract) { State = Phase.Failed; OperationSave.Clear(); } ShowPanel(); };
         if (SkipBriefing) Begin(); else ShowPanel();
     }
 
@@ -255,6 +263,7 @@ public partial class Mission : Node3D
                         Hud("Got the radio. Now find somewhere quiet to set it up.");
                         GD.Print("[mission] took the radio");
                     },
+                    Replay = () => { if (_intelProp != null) _intelProp.Visible = false; },
                 };
                 yield return new SetUpRadio();
                 break;
@@ -269,6 +278,7 @@ public partial class Mission : Node3D
                         Hud("Got it. HQ wants it now: send it from their own radio (hold F at it).");
                         GD.Print($"[mission] took {IntelName}");
                     },
+                    Replay = () => { if (_intelProp != null) _intelProp.Visible = false; },
                 };
                 yield return new Hold
                 {
@@ -279,6 +289,7 @@ public partial class Mission : Node3D
                         Hud("Sent. And their radio told everyone who sent it. Run.");
                         GD.Print("[mission] transmitted");
                     },
+                    Replay = () => Transmitted = true,
                 };
                 yield return new GetOut();
                 break;
@@ -288,7 +299,11 @@ public partial class Mission : Node3D
                     At = () => IntelAt, What = "plant a charge on the supply cache", Label = "CACHE", Seconds = 3.5f, Doing = "setting the charge",
                     Done = () => { Hud("Charge set: 25 seconds. Walk away. Briskly."); GD.Print("[mission] charge planted"); },
                 };
-                yield return new Fuse { Seconds = 25, At = () => IntelAt, Boom = Explode };
+                yield return new Fuse
+                {
+                    Seconds = 25, At = () => IntelAt, Boom = Explode,
+                    Replay = () => { foreach (var n in _cache) if (IsInstanceValid(n)) n.QueueFree(); _cache.Clear(); },
+                };
                 yield return new GetOut();
                 break;
             case Op.Officer:
@@ -306,6 +321,7 @@ public partial class Mission : Node3D
                 {
                     Who = () => _keyHolder, What = "get the cage keys from the sentry", Prompt = "Take his keys", Label = "KEYS",
                     Done = () => { HasKey = true; Hud("Got the keys. Now the cage."); },
+                    Replay = () => HasKey = true,
                 };
                 yield return new Hold
                 {
@@ -317,8 +333,22 @@ public partial class Mission : Node3D
                         Hud("The lock gives. Talk to him (F).");
                         GD.Print("[mission] cage open");
                     },
+                    Replay = () =>
+                    {
+                        if (_cageDoor != null) _cageDoor.QueueFree();
+                        if (_prisoner != null) Escorts.Add((_prisoner, first));
+                    },
                 };
-                yield return new Talk { Who = () => _prisoner, What = $"tell {_prisonerName} to follow you (F)" };
+                yield return new Talk
+                {
+                    Who = () => _prisoner, What = $"tell {_prisonerName} to follow you (F)",
+                    Replay = () =>
+                    {
+                        if (_prisoner == null) return;
+                        _prisoner.Follow();
+                        _prisoner.GlobalPosition = Player.GlobalPosition + Player.GlobalTransform.Basis * new Vector3(1.2f, 0, 2);
+                    },
+                };
                 yield return new GetOut();
                 break;
         }
@@ -336,6 +366,7 @@ public partial class Mission : Node3D
     private void NextStep()
     {
         StepIndex++;
+        _stepSave = true; _saveIn = 0;   // save as soon as it's safe
         if (StepIndex >= Steps.Count) { Complete(); return; }
         StartStep();
     }
@@ -593,7 +624,7 @@ public partial class Mission : Node3D
         if (Kind == Op.None) { _marker.Visible = false; return; }
         float dt = (float)delta;
         _fireLight.LightEnergy = 2f + MathF.Sin((float)Time.GetTicksMsec() * .013f) * .3f + MathF.Sin((float)Time.GetTicksMsec() * .031f) * .2f;
-        if (State is Phase.Intel or Phase.Extract) { Elapsed += delta; Reinforce(dt); }
+        if (State is Phase.Intel or Phase.Extract) { Elapsed += delta; Reinforce(dt); AutoSave(dt); }
 
         if (Now is { } step)
         {
@@ -692,6 +723,7 @@ public partial class Mission : Node3D
     private void Complete()
     {
         State = Phase.Complete;
+        OperationSave.Clear();
         GD.Print($"[mission] complete in {Elapsed:0} s");
         Completed?.Invoke();
         Kit.Current?.RemoveIntel();   // handed over
@@ -719,6 +751,7 @@ public partial class Mission : Node3D
     private void Fail(string why)
     {
         State = Phase.Failed;
+        OperationSave.Clear();
         _failWhy = why;
         GD.Print($"[mission] failed: {why}");
         ShowPanel();
@@ -735,6 +768,80 @@ public partial class Mission : Node3D
             _panelBack.Visible = false;
             GetViewport().SetInputAsHandled();
         }
+    }
+
+    // ================================================================= saving and carrying on
+
+    /// <summary>Safe to save: you're alive, nobody's hunting you, no fuse burning, nothing half done.</summary>
+    public bool Safe => State is Phase.Intel or Phase.Extract && !Player.Dead && Now is not Fuse && SearchProgress <= 0
+                        && !Guards.Exists(g => IsInstanceValid(g) && g.State is Guard.Mood.Suspicious or Guard.Mood.Investigate or Guard.Mood.Alert or Guard.Mood.Search
+                                               && g.GlobalPosition.DistanceTo(Player.GlobalPosition) < 250)
+                        && !(_reinforceIn > 0 && !_reinforced);
+
+    /// <summary>Every 30 s, and right after each step, when it's safe.</summary>
+    private void AutoSave(float dt)
+    {
+        _saveIn -= dt;
+        if (_saveIn > 0 || !Safe) return;
+        _saveIn = 30;
+        Snapshot().Save();
+        if (_stepSave && OperationSave.Persist) Hud("Progress saved");
+        _stepSave = false;
+    }
+
+    /// <summary>Quitting: save if it's safe. False when it isn't (the last safe save stays).</summary>
+    public bool SaveIfSafe()
+    {
+        if (!Safe) return false;
+        Snapshot().Save();
+        return true;
+    }
+
+    public OperationSave Snapshot()
+    {
+        var s = new OperationSave
+        {
+            Kind = Kind.ToString(), Seed = Seed, Step = StepIndex, Elapsed = Elapsed, Hour = TimeOfDay.Current?.Hour ?? StartHour,
+            X = Player.GlobalPosition.X, Y = Player.GlobalPosition.Y, Z = Player.GlobalPosition.Z, Yaw = Player.Rotation.Y,
+            Health = Player.Health, Reinforced = _reinforced, Loud = Loud,
+            PlannedX = PlannedFrom.X, PlannedY = PlannedFrom.Y, PlannedZ = PlannedFrom.Z,
+        };
+        for (int i = 0; i < Math.Min(_campGuards, Guards.Count); i++)
+            if (!IsInstanceValid(Guards[i]) || Guards[i].State == Guard.Mood.Dead)
+            {
+                var at = IsInstanceValid(Guards[i]) ? Guards[i].GlobalPosition : Guards[i].Home;
+                s.Dead.Add(new[] { i, at.X, at.Y, at.Z });
+            }
+        return s;
+    }
+
+    /// <summary>A saved operation comes back: steps already done are replayed (their mark on the world), the dead are
+    /// put back where they fell (and nobody panics about them again), and you carry on from the step you were on.</summary>
+    public void Resume(OperationSave s)
+    {
+        StepIndex = Math.Clamp(s.Step, 0, Steps.Count - 1);
+        for (int i = 0; i < StepIndex; i++) Steps[i].Replay?.Invoke();
+        Elapsed = s.Elapsed;
+        _reinforced = s.Reinforced; Loud = s.Loud;
+        if (_reinforced) _reinforceIn = 0;
+        Player.SetHealth(s.Health);
+        var dead = new List<Guard>();
+        foreach (var d in s.Dead)
+        {
+            int i = (int)d[0];
+            if (i < 0 || i >= Guards.Count) continue;
+            var g = Guards[i];
+            g.GlobalPosition = new Vector3(d[1], d[2], d[3]);
+            g.TakeHit(1000, g.GlobalPosition + Vector3.Up, g.GlobalPosition + Vector3.Right);
+            dead.Add(g);
+        }
+        foreach (var g in Guards) foreach (var body in dead) g.AlreadySaw(body);
+        State = Steps[StepIndex].IsExtract ? Phase.Extract : Phase.Intel;
+        StartStep();
+        _saveIn = 30; _stepSave = false;
+        ShowPanel();
+        Hud($"{OperationName}: carrying on where you left off");
+        GD.Print($"[mission] resumed {OperationName} at step {StepIndex + 1} of {Steps.Count}, {s.Dead.Count} dead");
     }
 
     /// <summary>For tests: do the objective now (every step up to getting out, except talking to people, which the

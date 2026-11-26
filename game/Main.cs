@@ -34,6 +34,8 @@ public partial class Main : Node3D
 	private static float _continueYaw;
 	private static bool _carryOn;
 	private static float? _lastHour;
+	/// <summary>Set when a finished operation hands over to the next one right here (no saved operation to load).</summary>
+	private static bool _carryOnOp;
 	private Settlements _towns = null!;
 	private Villages _villages = null!;
 	private Rocks? _rocks;
@@ -48,6 +50,12 @@ public partial class Main : Node3D
 	private Label _deathText = null!;
 	private (Vector3 position, float yaw) _spawn;
 	private bool _waitingForGround = true;
+
+	public override void _Notification(int what)
+	{
+		// Closing the window mid-operation: save it if it's safe (otherwise the last safe save stays).
+		if (what == NotificationWMCloseRequest) Mission.Current?.SaveIfSafe();
+	}
 
 	public override void _Ready()
 	{
@@ -74,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -141,11 +149,28 @@ public partial class Main : Node3D
 		_mission = new Mission { World = _world, Player = _walker, Rifle = _weapon, SkipBriefing = testing };
 		// Which operation: what the radio picked; otherwise (no home yet) go and steal a radio; at home, none.
 		var op = Mission.Op.Intel;
-		if (Mission.Next is { } next) { op = next.Kind; seed = next.Seed; Mission.Next = null; }
-		else if (!testing) op = DeadRecon.Base.HomeBase.Saved != null ? Mission.Op.None : Mission.Op.Radio;
+		// An operation you quit in the middle of comes back first (tests: only the one they hand over).
+		OperationSave.Persist = !testing;
+		OperationSave? resume = OperationSave.Pending ?? (Mission.Next == null && !_carryOnOp ? OperationSave.Load() : null);
+		OperationSave.Pending = null;
+		var planFrom = spawn.position;
+		if (Mission.Next is { } next) { op = next.Kind; seed = next.Seed; Mission.Next = null; OperationSave.Clear(); }
+		else if (resume != null && Enum.TryParse<Mission.Op>(resume.Kind, out var resumeOp) && resumeOp != Mission.Op.None)
+		{
+			op = resumeOp; seed = resume.Seed;
+			planFrom = new Vector3(resume.PlannedX, resume.PlannedY, resume.PlannedZ);
+			spawn = (new Vector3(resume.X, Math.Max(resume.Y, _world.HeightAt(resume.X, resume.Z)) + .2f, resume.Z), Mathf.RadToDeg(resume.Yaw));
+			_spawn = spawn;
+			_walker.GlobalPosition = spawn.position;
+			_walker.Look(spawn.yaw, -4);
+			_mission.SkipBriefing = true;
+		}
+		else { resume = null; if (!testing) op = DeadRecon.Base.HomeBase.Saved != null ? Mission.Op.None : Mission.Op.Radio; }
+		_carryOnOp = false;
 		if (Arg("op", "") is { Length: > 0 } opArg && Enum.TryParse<Mission.Op>(opArg, true, out var forced)) op = forced;
-		_mission.Plan(seed, spawn.position, op);
-		_mission.StartHour = op == Mission.Op.None ? (TimeOfDay.Current?.Hour ?? _lastHour ?? TimeOfDay.StartHourFor(seed)) : TimeOfDay.StartHourFor(seed);
+		_mission.Plan(seed, planFrom, op);
+		_mission.StartHour = resume != null ? resume.Hour
+			: op == Mission.Op.None ? (TimeOfDay.Current?.Hour ?? _lastHour ?? TimeOfDay.StartHourFor(seed)) : TimeOfDay.StartHourFor(seed);
 		if (DeadRecon.Base.HomeBase.Position is { } homePos) TreeScatter.Clearings.Add((new Vector2(homePos.X, homePos.Z), DeadRecon.Base.HomeBase.Radius + 4));
 
 		_terrain = new TerrainStreamer { World = _world, Viewer = _walker };
@@ -215,6 +240,7 @@ public partial class Main : Node3D
 		};
 		_mission.Trees = _trees;
 		AddChild(_mission);
+		if (resume != null) _mission.Resume(resume);
 		// Village people. Guards they ask you to deal with (checkpoints) are spawned through here.
 		_life = new DeadRecon.People.VillageLife
 		{
@@ -367,6 +393,7 @@ public partial class Main : Node3D
 		if (Arg("zootest", "") != "") _ = RunZooTest(Arg("zootest", ""));
 		if (Arg("snaketest", "") != "") _ = RunSnakeTest(Arg("snaketest", ""));
 		if (Arg("rocktest", "") != "") _ = RunRockTest(Arg("rocktest", ""));
+		if (Arg("resumetest", "") != "") _ = RunResumeTest(Arg("resumetest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -922,6 +949,67 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Animals: the nearest village's dogs and livestock, then wildlife beside you, then a gunshot.</summary>
+	private static int _resumeStage;
+
+	/// <summary>Save mid-operation and carry on: a prisoner rescue played to "he's following you", one guard shot,
+	/// you walk off; saved; the scene reloads from the save; is everything where it was?</summary>
+	private async Task RunResumeTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		if (_resumeStage == 0)
+		{
+			GD.Print($"[resume] before: {_mission.Objective()}");
+			_mission.TestTakeIntel();   // keys, then the lock
+			var pr = _mission.Prisoner!;
+			_walker.SetFlying(false);
+			_walker.GlobalPosition = pr.GlobalPosition + new Vector3(0, .5f, 2.4f);
+			for (int f = 0; f < 600 && !_terrain.HasCollisionAt(_walker.GlobalPosition); f++) await Frames(1);
+			await Seconds(1);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = true });
+			await Frames(3);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = false });
+			await Seconds(1);
+			var victim = _mission.Guards[0];
+			victim.TakeHit(1000, victim.GlobalPosition + Vector3.Up, victim.GlobalPosition + Vector3.Right);
+			// Walk off 40 m toward the way out.
+			var away = (_mission.Extraction - _mission.Camp) with { Y = 0 };
+			var at = _mission.Camp + away.Normalized() * 40;
+			_walker.GlobalPosition = at with { Y = _world.HeightAt(at.X, at.Z) + .3f };
+			_time.Hour = 15.25f;
+			await Seconds(2);
+			GD.Print($"[resume] saving: {_mission.Objective()}; safe {_mission.Safe}; prisoner following {pr.Following}; dead guard at {victim.GlobalPosition}");
+			var save = _mission.Snapshot();
+			GD.Print($"[resume] saved step {save.Step + 1}, {save.Dead.Count} dead, at ({save.X:0},{save.Z:0}), hour {save.Hour:0.00}");
+			OperationSave.Pending = save;
+			_resumeStage = 1;
+			GetTree().ReloadCurrentScene();
+			return;
+		}
+		await Seconds(3);
+		var p2 = _mission.Prisoner!;
+		GD.Print($"[resume] after loading: {_mission.Objective()}; state {_mission.State}; step {_mission.StepIndex + 1}");
+		GD.Print($"[resume] you at ({_walker.GlobalPosition.X:0},{_walker.GlobalPosition.Z:0}), hour {_time.Hour:0.00}; prisoner following {p2.Following}, {p2.GlobalPosition.DistanceTo(_walker.GlobalPosition):0.0} m from you; guard 0 {_mission.Guards[0].State} at {_mission.Guards[0].GlobalPosition}; key {_mission.HasKey}");
+		var cam = new Camera3D { Fov = 60 };
+		AddChild(cam);
+		cam.GlobalPosition = _walker.GlobalPosition + new Vector3(3, 2.5f, 3);
+		cam.LookAt(p2.GlobalPosition + Vector3.Up);
+		cam.MakeCurrent();
+		await Shot("resumed");
+		GetTree().Quit();
+	}
+
 	/// <summary>Photos: the jungle floor (is it green?), then Thornwake's rock formations, wherever the nearest ones are.</summary>
 	private async Task RunRockTest(string dir)
 	{

@@ -18,6 +18,8 @@ public partial class Walker : CharacterBody3D, IDamageable
     public bool FireLockedUntilRelease { get; set; }
 
     public float Health { get; private set; } = MaxHealth;
+    /// <summary>A saved operation coming back: how hurt you were.</summary>
+    public void SetHealth(float h) => Health = Math.Clamp(h, 1, MaxHealth);
     public bool Dead => Health <= 0;
     public bool Crouching { get; private set; }
     public bool Running { get; private set; }

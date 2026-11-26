@@ -41,6 +41,8 @@ public partial class Villager : CharacterBody3D, IDamageable
 
     /// <summary>Done following: walk to this spot and sit there (a rescued man at your fire).</summary>
     public void Rest(Vector3 at) { Following = false; _restAt = at; }
+    /// <summary>Already found (a saved operation coming back): following you.</summary>
+    public void Follow() { Following = true; _restAt = null; }
     /// <summary>What you say to get him to follow, his answer, and what he calls out (lost farmers by default).</summary>
     public string FoundPrompt = "\"It's alright. Follow me.\"";
     public string FoundLine = "Oh, thank goodness! I thought I'd be eaten! Lead the way, I'm right behind you.";
