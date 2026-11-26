@@ -26,6 +26,68 @@ static class Settler
     sealed record Field(int Site, string Kind, string Stage, double X, double Z, double Yaw, double W, double D) { public double Level; }
     sealed record Road(string Kind, double Width, List<(double X, double Z)> Points) { public double[] Profile = Array.Empty<double>(); }
 
+    /// <summary>
+    /// No cliffs into the water (Tom: "we need good-looking rivers"). Where a river cuts through a hill the generator
+    /// leaves the gorge walls standing: about 4% of river banks rose more than 4 m within one 2 m step, and one beside
+    /// the first spawn stood 9 m sheer above a pool. Near any water the ground may rise at most 0.4 m plus 0.65 m per
+    /// metre from the nearest water's edge (above that water's surface): walls are cut back into steep natural
+    /// banks, and the gentle banks (most of them) are already below the limit and stay as they were. Real gorges (ground
+    /// that would need cutting more than 12 m) keep their walls. Runs after the sites and roads, so the layout doesn't move.
+    /// </summary>
+    static void SoftenBanks(float[] H, bool[] wet, float[] level, int S, double spacing)
+    {
+        // The highest the ground may be: a cone around every water sample (its level + 0.4 m, then 0.65 m per metre),
+        // the lowest cone wins. Spread outward with a priority queue, up to 24 m from the water.
+        const float Rise = .65f, Reach = 24;
+        float step = (float)spacing, diag = step * 1.4142f;
+        var cap = new float[S * S];
+        var from = new float[S * S];             // metres from the water along the way
+        Array.Fill(cap, float.PositiveInfinity);
+        var pq = new PriorityQueue<int, float>();
+        for (int k = 0; k < S * S; k++)
+            if (wet[k]) { cap[k] = level[k] + .4f - Rise * step * .5f; from[k] = 0; pq.Enqueue(k, cap[k]); }
+        var dirs = new (int dx, int dz, float d)[] { (1, 0, step), (-1, 0, step), (0, 1, step), (0, -1, step), (1, 1, diag), (1, -1, diag), (-1, 1, diag), (-1, -1, diag) };
+        while (pq.TryDequeue(out int k, out float c))
+        {
+            if (c > cap[k]) continue;
+            int x = k % S, z = k / S;
+            foreach (var (dx, dz, d) in dirs)
+            {
+                int xx = x + dx, zz = z + dz;
+                if (xx < 0 || zz < 0 || xx >= S || zz >= S) continue;
+                int q = zz * S + xx;
+                if (wet[q] || from[k] + d > Reach) continue;
+                float nc = c + Rise * d;
+                if (nc >= cap[q]) continue;
+                cap[q] = nc; from[q] = from[k] + d;
+                pq.Enqueue(q, nc);
+            }
+        }
+        int lowered = 0, gorge = 0; double cut = 0;
+        for (int k = 0; k < S * S; k++)
+        {
+            if (wet[k] || float.IsPositiveInfinity(cap[k]) || H[k] <= cap[k]) continue;
+            if (H[k] - cap[k] > 12) { gorge++; continue; }   // a real gorge: leave its rock walls (cutting only moves the cliff back)
+            // ...but never below the rim of water right beside it (a pool above a fall would hang in the air).
+            float rim = float.NegativeInfinity;
+            int x = k % S, z = k / S;
+            for (int dz = -2; dz <= 2; dz++)
+            for (int dx = -2; dx <= 2; dx++)
+            {
+                int xx = x + dx, zz = z + dz;
+                if (xx < 0 || zz < 0 || xx >= S || zz >= S) continue;
+                int q = zz * S + xx;
+                if (wet[q]) rim = Math.Max(rim, level[q] + .3f);
+            }
+            float to = Math.Max(cap[k], Math.Min(H[k], rim));
+            if (to >= H[k]) continue;
+            cut = Math.Max(cut, H[k] - to);
+            H[k] = to;
+            lowered++;
+        }
+        Log($"  banks: {lowered} samples near water cut back (deepest {cut:0.0} m); {gorge} left as gorge walls");
+    }
+
     public static void Run(string dir)
     {
         using var info = JsonDocument.Parse(File.ReadAllText(Path.Combine(dir, "world.json")));
@@ -48,6 +110,7 @@ static class Settler
         }
         var H = new float[S * S];
         var wet = new bool[S * S];
+        var waterLevel = new float[S * S];
         for (int tz = 0; tz < per; tz++)
         for (int tx = 0; tx < per; tx++)
         {
@@ -58,7 +121,9 @@ static class Settler
             {
                 int o = (j * n + i) * 2, g = (tz * (n - 1) + j) * S + tx * (n - 1) + i;
                 H[g] = (float)(hMin + BitConverter.ToUInt16(hb, o) * hStep);
-                wet[g] = BitConverter.ToUInt16(wb, o) != 0;
+                ushort wv = BitConverter.ToUInt16(wb, o);
+                wet[g] = wv != 0;
+                waterLevel[g] = wv != 0 ? (float)(hMin + wv * hStep) : float.NaN;
             }
         }
         Log($"Settling {dir}: {S}x{S} samples, {spacing} m apart");
@@ -396,6 +461,9 @@ static class Settler
             }
         }
         Log($"  {fields.Count} fields ({fields.Count(f => f.Kind == "paddy")} rice paddies, {fields.Count(f => f.Kind == "wheat")} wheat)");
+
+        // ---- river banks, last: after the sites and roads are placed, so they stay exactly where they were
+        SoftenBanks(H, wet, waterLevel, S, spacing);
 
         // ---- write
         for (int tz = 0; tz < per; tz++)

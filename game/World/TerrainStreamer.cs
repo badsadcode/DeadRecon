@@ -36,7 +36,11 @@ public partial class TerrainStreamer : Node3D
     private int _building;
     private double _sinceUpdate = 1;
     private Material _groundMaterial = null!;
-    private StandardMaterial3D _waterMaterial = null!;
+    private ShaderMaterial _waterMaterial = null!;
+    // River's procedural ripple normals and foam (ProceduralTextures.cs), made once.
+    private static readonly Lazy<ImageTexture> RippleLarge = new(() => ProceduralTextures.WaterNormals(512, 11, 4, 7f));
+    private static readonly Lazy<ImageTexture> RippleSmall = new(() => ProceduralTextures.WaterNormals(512, 23, 8, 10f));
+    private static readonly Lazy<ImageTexture> FoamTex = new(() => ProceduralTextures.Foam(512, 37));
 
     public int TilesAtFullDetail { get; private set; }
     public bool HasTextures { get; private set; }
@@ -45,7 +49,7 @@ public partial class TerrainStreamer : Node3D
     public void SetWetness(float wet)
     {
         ((ShaderMaterial)_groundMaterial).SetShaderParameter("wetness", wet);
-        _waterMaterial.Roughness = .45f - .3f * wet;
+        _waterMaterial.SetShaderParameter("rain", Weather.Current?.Intensity ?? wet);
     }
 
     /// <summary>0 = painted placeholder ground, 1 = Tom's photo textures (toggle in game to compare).</summary>
@@ -85,11 +89,11 @@ public partial class TerrainStreamer : Node3D
         }
         _groundMaterial = ground;
         TextureMix = all ? 1 : 0;
-        _waterMaterial = new StandardMaterial3D
-        {
-            AlbedoColor = new Color(.20f, .19f, .11f, .9f), Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            Roughness = .45f, Metallic = .0f, MetallicSpecular = .15f, CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
+        // Rivers: badsadcode/river's water (river.gdshader), fed per vertex by BuildWater.
+        _waterMaterial = new ShaderMaterial { Shader = GD.Load<Shader>("res://game/World/river.gdshader") };
+        _waterMaterial.SetShaderParameter("ripple_large", RippleLarge.Value);
+        _waterMaterial.SetShaderParameter("ripple_small", RippleSmall.Value);
+        _waterMaterial.SetShaderParameter("foam_tex", FoamTex.Value);
         for (int tz = 0; tz < World.TilesPerSide; tz++)
         for (int tx = 0; tx < World.TilesPerSide; tx++)
             _tiles.Add(new Tile { Tx = tx, Tz = tz });
@@ -240,19 +244,66 @@ public partial class TerrainStreamer : Node3D
         if (quads.Count == 0) return null;
         var m = new MeshData(quads.Count * 4, quads.Count * 6);
         float s = step * World.Spacing;
-        var white = Colors.White;
+        var field = new Dictionary<(int, int), (Color, Vector2)>();
+        (Color, Vector2) F(int gx, int gz, float level)
+        {
+            if (!field.TryGetValue((gx, gz), out var f)) field[(gx, gz)] = f = WaterField(gx, gz, level);
+            return f;
+        }
         foreach (var (gx, gz, l) in quads)
         {
             float x = World.SampleToWorld(gx), z = World.SampleToWorld(gz);
             int a = m.Count;
-            m.Add(new Vector3(x, l.X, z), Vector3.Up, white);
-            m.Add(new Vector3(x + s, l.Y, z), Vector3.Up, white);
-            m.Add(new Vector3(x, l.Z, z + s), Vector3.Up, white);
-            m.Add(new Vector3(x + s, l.W, z + s), Vector3.Up, white);
+            var (c0, u0) = F(gx, gz, l.X); var (c1, u1) = F(gx + step, gz, l.Y);
+            var (c2, u2) = F(gx, gz + step, l.Z); var (c3, u3) = F(gx + step, gz + step, l.W);
+            m.Add(new Vector3(x, l.X, z), Vector3.Up, c0, u0);
+            m.Add(new Vector3(x + s, l.Y, z), Vector3.Up, c1, u1);
+            m.Add(new Vector3(x, l.Z, z + s), Vector3.Up, c2, u2);
+            m.Add(new Vector3(x + s, l.W, z + s), Vector3.Up, c3, u3);
             m.Tri(a, a + 1, a + 2); m.Tri(a + 1, a + 3, a + 2);
         }
         return m;
     }
+
+    /// <summary>
+    /// What river.gdshader needs at a water sample, from the baked water surface (vertex COLOR: current x and z,
+    /// ±3 m/s as 0..1; depth, 0..8 m as 0..1; foam. UV.x: distance to the bank in metres, negative in the water).
+    /// The current runs down the water surface's slope (fitted over ~12 m, so it's smooth): steeper runs faster,
+    /// a level pool barely moves (wind ripples do the work there). Rapids foam where it's steep; fast shallows too.
+    /// </summary>
+    private (Color, Vector2) WaterField(int gx, int gz, float level)
+    {
+        float depth = Math.Clamp(level - World.Ground(gx, gz), 0, 8);
+        float sx = 0, sxx = 0, sz = 0, szz = 0;
+        for (int j = -6; j <= 6; j += 2)
+        for (int i = -6; i <= 6; i += 2)
+        {
+            if (i == 0 && j == 0) continue;
+            float w = World.Water(gx + i, gz + j);
+            if (float.IsNaN(w)) continue;
+            float dh = w - level;
+            sx += dh * i; sxx += i * i;
+            sz += dh * j; szz += j * j;
+        }
+        float slopeX = sxx > 0 ? sx / sxx / World.Spacing : 0, slopeZ = szz > 0 ? sz / szz / World.Spacing : 0;
+        float slope = MathF.Sqrt(slopeX * slopeX + slopeZ * slopeZ);
+        float speed = slope < 2e-4f ? 0 : Math.Clamp(.12f + 9f * MathF.Sqrt(slope), 0, 2.8f) * Math.Clamp(depth / .5f, .35f, 1);
+        float vx = slope > 0 ? -slopeX / slope * speed : 0, vz = slope > 0 ? -slopeZ / slope * speed : 0;
+        // The bank: the nearest dry sample, looking out in eight directions up to 12 m.
+        float shore = -12;
+        for (int r = 1; r <= 6 && shore < -11; r++)
+            for (int d = 0; d < 8; d++)
+            {
+                int dx = d switch { 0 or 1 or 7 => 1, 3 or 4 or 5 => -1, _ => 0 } * r, dz = d switch { 1 or 2 or 3 => 1, 5 or 6 or 7 => -1, _ => 0 } * r;
+                if (!float.IsNaN(World.Water(gx + dx, gz + dz))) continue;
+                shore = -r * World.Spacing * (d % 2 == 1 ? 1.41f : 1);
+                break;
+            }
+        float foam = Math.Clamp(Smooth(.012f, .05f, slope) * .85f + (depth < .35f && speed > .7f ? .35f : 0), 0, 1);
+        return (new Color(vx / 6 + .5f, vz / 6 + .5f, depth / 8, foam), new Vector2(shore, 0));
+    }
+
+    private static float Smooth(float a, float b, float x) { float t = Math.Clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); }
 
     private Vector3 Normal(int gx, int gz, int step)
     {

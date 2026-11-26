@@ -82,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -397,6 +397,7 @@ public partial class Main : Node3D
 		if (Arg("resumetest", "") != "") _ = RunResumeTest(Arg("resumetest", ""));
 		if (Arg("downtest", "") != "") _ = RunDownTest(Arg("downtest", ""));
 		if (Arg("meleetest", "") != "") _ = RunMeleeTest(Arg("meleetest", ""));
+		if (Arg("rivertest", "") != "") _ = RunRiverTest(Arg("rivertest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -1128,6 +1129,79 @@ public partial class Main : Node3D
 		await Press(Godot.Key.G);
 		await Seconds(.8);
 		GD.Print($"[melee] guard B ({bState}) after G: {b.State}");
+		GetTree().Quit();
+	}
+
+	/// <summary>Rivers: the nearest wide water, from the bank, low over it, at golden hour and in the rain.</summary>
+	private async Task RunRiverTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+			GD.Print($"[river] shot {name}");
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		// The nearest sample with water at least ~10 m across (wet 4 samples each way).
+		var start = _walker.GlobalPosition;
+		Vector3? found = null;
+		for (int r = 10; r < 1500 && found == null; r += 6)
+			for (int k = 0; k < 64 && found == null; k++)
+			{
+				float a = k / 64f * MathF.Tau;
+				float x = start.X + MathF.Cos(a) * r, z = start.Z + MathF.Sin(a) * r;
+				var (fx, fz) = _world.ToSample(x, z);
+				int gx = (int)fx, gz = (int)fz;
+				if (!_world.IsWet(gx, gz)) continue;
+				bool wide = _world.IsWet(gx + 4, gz) && _world.IsWet(gx - 4, gz) || _world.IsWet(gx, gz + 4) && _world.IsWet(gx, gz - 4);
+				if (wide) found = new Vector3(x, _world.Water(gx, gz), z);
+			}
+		if (found is not { } w) { GD.Print("[river] no river near"); GetTree().Quit(); return; }
+		GD.Print($"[river] river {w.DistanceTo(start):0} m away at {w}");
+		// Which way does it run? Fit the water's slope the way the streamer does, and find the bank.
+		var (sx, sz) = _world.ToSample(w.X, w.Z);
+		float hx = _world.Water((int)sx + 6, (int)sz) - _world.Water((int)sx - 6, (int)sz), hz = _world.Water((int)sx, (int)sz + 6) - _world.Water((int)sx, (int)sz - 6);
+		GD.Print($"[river] surface drop over 24 m: x {hx:0.00} m, z {hz:0.00} m; depth {w.Y - _world.Ground((int)sx, (int)sz):0.0} m");
+		Vector3 bank = w;
+		for (int r = 2; r < 60; r += 2)
+			foreach (var d in new[] { Vector3.Right, Vector3.Left, Vector3.Forward, Vector3.Back })
+			{
+				var p = w + d * r;
+				var (bx, bz) = _world.ToSample(p.X, p.Z);
+				if (!_world.IsWet((int)bx, (int)bz)) { bank = p; r = 99; break; }
+			}
+		bank.Y = _world.HeightAt(bank.X, bank.Z);
+		var cam = new Camera3D { Fov = 65, Near = .05f, Far = 4000 };
+		AddChild(cam);
+		void Frame(Vector3 from, Vector3 at) { cam.GlobalPosition = from; cam.LookAt(at); cam.MakeCurrent(); }
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = bank + Vector3.Up * 2;
+		for (int f = 0; f < 2400 && (_trees.Pending > 0 || !_terrain.Settled); f++) await Frames(1);
+		await Seconds(3);
+		var across = (w - bank) with { Y = 0 };
+		across = across.LengthSquared() > .1f ? across.Normalized() : Vector3.Forward;
+		var along = new Vector3(-across.Z, 0, across.X);
+		Frame(bank + Vector3.Up * 2.2f - across * 2, w + along * 25 + across * 4);
+		await Shot("1_bank_morning");
+		Frame(w with { Y = w.Y + .9f } - across * 3, w + along * 40 + Vector3.Down * .5f);
+		await Shot("2_low_over_water");
+		Frame(bank + Vector3.Up * 18 - across * 10, w + along * 10);
+		await Shot("3_from_above");
+		_time.Hour = 17.6f;
+		await Seconds(1.5);
+		Frame(bank + Vector3.Up * 2.2f - across * 2, w + along * 25 + across * 4);
+		await Shot("4_golden_hour");
+		_time.Hour = 13;
+		_weather.SetNow(Weather.Kind.Storm);
+		await Seconds(3);
+		Frame(bank + Vector3.Up * 2.2f - across * 2, w + along * 12 + across * 3);
+		await Shot("5_rain");
 		GetTree().Quit();
 	}
 
