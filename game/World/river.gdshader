@@ -269,8 +269,8 @@ void fragment() {
 
 	// ------------------------------------------------------------- foam
 	float foam_field = v_foam;
-	float lap = (1.0 - smoothstep(0.0, 0.6, -shore)) * (0.08 + 0.22 * smoothstep(0.15, 1.0, speed));
-	float coverage = foam_field * 0.7 + lap + rough_water * 0.15;
+	float lap = (1.0 - smoothstep(0.0, 0.5, -shore)) * (0.05 + 0.12 * smoothstep(0.3, 1.5, speed));
+	float coverage = foam_field * 0.7 + lap + rough_water * 0.06;
 	float patch = flow_scalar(foam_tex, xz, flow, 38.0, foam_cycle * 3.0, t, jitter);
 	float white = max(smoothstep(2.0, 3.0, speed) * rough_water, smoothstep(0.85, 1.0, foam_field));
 	coverage = clamp(max(coverage * mix(0.35, 1.3, patch), white * foam_field * mix(0.7, 0.95, patch)), 0.0, mix(foam_max, 0.85, white));

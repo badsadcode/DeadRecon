@@ -457,7 +457,9 @@ public partial class Main : Node3D
 	public override void _UnhandledInput(InputEvent e)
 	{
 		if (_viewOnly) return;
-		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F9 } && _hud != null)
+		// F9: a debug dump for Sage (a screenshot and where you are, what you see) in %APPDATA%\DeadRecon\debug.
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F9 } && _walker != null) _ = DebugDump();
+		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.F8 } && _hud != null)
 		{
 			DeadRecon.UI.Settings.ShowDebug = !DeadRecon.UI.Settings.ShowDebug;
 			DeadRecon.UI.Settings.Save();
@@ -1148,8 +1150,10 @@ public partial class Main : Node3D
 		_time.Frozen = true; _time.Hour = 10;
 		_walker.Invulnerable = true;
 		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
-		// The nearest sample with water at least ~10 m across (wet 4 samples each way).
+		// The nearest sample with water at least ~10 m across (wet 4 samples each way). --near=x,z: near there instead.
 		var start = _walker.GlobalPosition;
+		if ((OS.GetCmdlineUserArgs().FirstOrDefault(a => a.StartsWith("--near="))?.Split("=", 2)[1] ?? "").Split(',') is { Length: 2 } nearArg && float.TryParse(nearArg[0], System.Globalization.CultureInfo.InvariantCulture, out float nx)
+		    && float.TryParse(nearArg[1], System.Globalization.CultureInfo.InvariantCulture, out float nz)) start = new Vector3(nx, 0, nz);
 		Vector3? found = null;
 		for (int r = 10; r < 1500 && found == null; r += 6)
 			for (int k = 0; k < 64 && found == null; k++)
@@ -1203,6 +1207,62 @@ public partial class Main : Node3D
 		Frame(bank + Vector3.Up * 2.2f - across * 2, w + along * 12 + across * 3);
 		await Shot("5_rain");
 		GetTree().Quit();
+	}
+
+	/// <summary>
+	/// F9: save what you're looking at, for Sage to inspect: shot.png (exactly your screen) and info.json (position,
+	/// view direction, time, weather, operation, and the ground and water samples around you), in
+	/// %APPDATA%\DeadRecon\debug\&lt;date-time&gt;\. Taken before the toast, so the toast isn't in the picture.
+	/// </summary>
+	private async Task DebugDump()
+	{
+		string stamp = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss");
+		string dir = Path.Combine(ProjectSettings.GlobalizePath("user://debug"), stamp);
+		Directory.CreateDirectory(dir);
+		await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+		GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, "shot.png"));
+		var p = _walker.GlobalPosition;
+		var cam = _walker.Camera.GlobalTransform;
+		var (fx, fz) = _world.ToSample(p.X, p.Z);
+		int gx = (int)MathF.Round(fx), gz = (int)MathF.Round(fz);
+		// 21 x 21 samples (40 m square) round you: ground and water (null = dry).
+		var ground = new float[21][]; var water = new float?[21][];
+		for (int j = 0; j < 21; j++)
+		{
+			ground[j] = new float[21]; water[j] = new float?[21];
+			for (int i = 0; i < 21; i++)
+			{
+				ground[j][i] = MathF.Round(_world.Ground(gx + i - 10, gz + j - 10) * 100) / 100;
+				float w = _world.Water(gx + i - 10, gz + j - 10);
+				water[j][i] = float.IsNaN(w) ? null : MathF.Round(w * 100) / 100;
+			}
+		}
+		var fwd = -cam.Basis.Z;
+		var info = new
+		{
+			when = stamp,
+			position = new[] { p.X, p.Y, p.Z },
+			camera = new[] { cam.Origin.X, cam.Origin.Y, cam.Origin.Z },
+			looking = new[] { fwd.X, fwd.Y, fwd.Z },
+			yaw_deg = Mathf.RadToDeg(_walker.Rotation.Y),
+			fov = _walker.Camera.Fov,
+			hour = _time.Hour,
+			weather = _weather.Describe(),
+			wetness = _weather.Wetness,
+			fps = Engine.GetFramesPerSecond(),
+			health = _walker.Health,
+			flying = _walker.Flying,
+			operation = _mission.Kind.ToString(),
+			objective = _mission.Objective(),
+			nearest_guard = GuardStatus(),
+			sample = new[] { gx, gz },
+			grid_note = "21x21 samples, 2 m apart, centred on you; rows run north to south (+z), columns west to east (+x)",
+			ground,
+			water,
+		};
+		File.WriteAllText(Path.Combine(dir, "info.json"), System.Text.Json.JsonSerializer.Serialize(info, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+		GD.Print($"[debug] dump saved to {dir}");
+		DeadRecon.UI.Hud.Toast($"Debug dump saved ({stamp}). Tell Sage!");
 	}
 
 	private static int _resumeStage;

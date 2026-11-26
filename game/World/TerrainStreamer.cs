@@ -238,7 +238,11 @@ public partial class TerrainStreamer : Node3D
             foreach (float l in lv) if (!float.IsNaN(l)) { sum += l; wet++; }
             if (wet == 0) continue;
             float avg = sum / wet;
-            for (int k = 0; k < 4; k++) if (float.IsNaN(lv[k])) lv[k] = avg;
+            // A dry corner: the water's level, but tucked just under the ground there, so the sheet meets the bank
+            // instead of ending in a floating edge over lower ground (Tom: gaps and slabs along the rivers).
+            int[] cx = { 0, step, 0, step }, cz = { 0, 0, step, step };
+            for (int k = 0; k < 4; k++)
+                if (float.IsNaN(lv[k])) lv[k] = Math.Min(avg, World.Ground(gx + cx[k], gz + cz[k]) - .04f);
             quads.Add((gx, gz, new Vector4(lv[0], lv[1], lv[2], lv[3])));
         }
         if (quads.Count == 0) return null;
@@ -268,15 +272,18 @@ public partial class TerrainStreamer : Node3D
     /// <summary>
     /// What river.gdshader needs at a water sample, from the baked water surface (vertex COLOR: current x and z,
     /// ±3 m/s as 0..1; depth, 0..8 m as 0..1; foam. UV.x: distance to the bank in metres, negative in the water).
-    /// The current runs down the water surface's slope (fitted over ~12 m, so it's smooth): steeper runs faster,
-    /// a level pool barely moves (wind ripples do the work there). Rapids foam where it's steep; fast shallows too.
+    /// The current follows River's physics (its FlowSolver's Manning law: v = h^(2/3) √S / n), with the surface slope S
+    /// fitted over ~40 m: the generator's surfaces come in steps, and over a few metres every step looked like a rapid
+    /// (Tom: foam everywhere). Foam only where the water is really fast for its depth (Froude number), and the steps
+    /// themselves get the shader's falling-water streaks.
     /// </summary>
     private (Color, Vector2) WaterField(int gx, int gz, float level)
     {
+        const float Manning = .045f;           // a rough, rocky jungle river
         float depth = Math.Clamp(level - World.Ground(gx, gz), 0, 8);
         float sx = 0, sxx = 0, sz = 0, szz = 0;
-        for (int j = -6; j <= 6; j += 2)
-        for (int i = -6; i <= 6; i += 2)
+        for (int j = -20; j <= 20; j += 4)
+        for (int i = -20; i <= 20; i += 4)
         {
             if (i == 0 && j == 0) continue;
             float w = World.Water(gx + i, gz + j);
@@ -286,8 +293,9 @@ public partial class TerrainStreamer : Node3D
             sz += dh * j; szz += j * j;
         }
         float slopeX = sxx > 0 ? sx / sxx / World.Spacing : 0, slopeZ = szz > 0 ? sz / szz / World.Spacing : 0;
-        float slope = MathF.Sqrt(slopeX * slopeX + slopeZ * slopeZ);
-        float speed = slope < 2e-4f ? 0 : Math.Clamp(.12f + 9f * MathF.Sqrt(slope), 0, 2.8f) * Math.Clamp(depth / .5f, .35f, 1);
+        float slope = Math.Min(MathF.Sqrt(slopeX * slopeX + slopeZ * slopeZ), .08f);
+        float h = Math.Max(depth, .15f);
+        float speed = slope < 1e-4f ? 0 : Math.Min(MathF.Pow(h, 2f / 3f) * MathF.Sqrt(slope) / Manning, 2.8f);
         float vx = slope > 0 ? -slopeX / slope * speed : 0, vz = slope > 0 ? -slopeZ / slope * speed : 0;
         // The bank: the nearest dry sample, looking out in eight directions up to 12 m.
         float shore = -12;
@@ -299,7 +307,9 @@ public partial class TerrainStreamer : Node3D
                 shore = -r * World.Spacing * (d % 2 == 1 ? 1.41f : 1);
                 break;
             }
-        float foam = Math.Clamp(Smooth(.012f, .05f, slope) * .85f + (depth < .35f && speed > .7f ? .35f : 0), 0, 1);
+        float froude = speed / MathF.Sqrt(9.81f * h);
+        // (shallow riffles, under ~40 cm, stay glassy ripples: they foamed white in Tom's screenshot)
+        float foam = Smooth(1.1f, 1.8f, froude) * .6f * Smooth(.25f, .6f, depth);
         return (new Color(vx / 6 + .5f, vz / 6 + .5f, depth / 8, foam), new Vector2(shore, 0));
     }
 
