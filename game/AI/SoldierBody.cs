@@ -212,6 +212,9 @@ public partial class SoldierBody : Node3D
         }
     }
 
+    /// <summary>He throws his gun down (surrendering): it lands in front of him, and you can pick it up.</summary>
+    public void ThrowDownGun(Vector3 forward) => DropGun(forward * .5f);
+
     private void DropGun(Vector3 shotDirection)
     {
         if (_gun == null || !IsInstanceValid(_gun)) return;
@@ -232,6 +235,7 @@ public partial class SoldierBody : Node3D
             if (IsInstanceValid(body)) body.ApplyImpulse(shotDirection.Normalized() * 2 + Vector3.Up, new Vector3(0, 0, .4f));
         };
         GetTree().CreateTimer(15).Timeout += () => { if (IsInstanceValid(body)) body.Freeze = true; };
+        _gun = null!;   // it's not his any more: stop posing his arms round it
     }
 
     public override void _Process(double delta)
@@ -272,7 +276,7 @@ public partial class SoldierBody : Node3D
 
     private void PoseGunAndArms()
     {
-        if (_gun == null) return;
+        if (_gun == null || !IsInstanceValid(_gun)) return;
         // The gun's butt at the right shoulder, a bit forward and in toward the chest.
         var shoulder = Global(_bones["RightUpperArm"]).Origin;
         var butt = shoulder + new Vector3(.06f, -.03f, .07f);

@@ -92,11 +92,11 @@ public partial class Mission
         public Func<Guard?> Who = null!;
         public string What = "", Prompt = "", Label = "";
         public Action? Done;
-        public override string Text => Dead ? $"{What} (F at the body)" : What;
+        public override string Text => Dead ? $"{What} (F at him)" : What;
         public override string Marker => Label;
         public override float MarkerLift => Dead ? 1f : 2.4f;
         public override Vector3? Target => Who() is { } g && IsInstanceValid(g) ? g.GlobalPosition : null;
-        private bool Dead => Who() is { } g && (!IsInstanceValid(g) || g.State == Guard.Mood.Dead);
+        private bool Dead => Who() is { } g && (!IsInstanceValid(g) || g.State == Guard.Mood.Dead || g.Out);
         public override bool Tick(float dt)
         {
             if (Who() is not { } g) { Done?.Invoke(); return true; }   // nobody to search (he was never there)

@@ -353,13 +353,15 @@ public partial class Kit : Node
         Guard? body = null;
         if (!Player.Dead)
             foreach (var g in Guard.All)
-                if (g.State == Guard.Mood.Dead && !_searched.Contains(g) && g.GlobalPosition.DistanceTo(Player.GlobalPosition) < 2.4f) { body = g; break; }
+                if (g.State is Guard.Mood.Dead or Guard.Mood.Restrained && !_searched.Contains(g) && g.GlobalPosition.DistanceTo(Player.GlobalPosition) < 2.4f) { body = g; break; }
         if (body != null)
         {
-            Hud.Prompt("F   Search the body");
+            Hud.Prompt(body.State == Guard.Mood.Restrained ? "F   Search his pockets" : "F   Search the body");
             if (fKey && !_fWas && captured) Search(body);
         }
-        else if (!Player.Dead && DroppedGunNear() is { } gun)
+        // A prisoner right here owns F (cuff him first); his thrown-down gun can wait.
+        else if (!Player.Dead && !Guard.All.Exists(g => g.State is Guard.Mood.Surrendered or Guard.Mood.Unconscious && g.GlobalPosition.DistanceTo(Player.GlobalPosition) < 2.6f)
+                 && DroppedGunNear() is { } gun)
         {
             var def = WeaponDef.Get((string)gun.GetMeta("weapon"));
             if (def.Id != Loadout.Weapon)

@@ -293,7 +293,14 @@ Each step is playable on its own.
    - escort the trader
    - **hold the village** (living attack, travelling reinforcements, radio updates)
 5. **Morale and surrender** (needed by capture and the village defence), radio checks and missing patrols, radio
-   operators who call for help, searching in a line.
+   operators who call for help, searching in a line. **Done (2026-11-26), except searching in a line (moved to 8):**
+   every guard has morale: a friend falling nearby costs 0.22 (their leader 0.4), being hit 0.15, fighting alone
+   bleeds it; quiet slowly restores it. Under 0.3 he falls back (once, ~9 s, not shooting); under 0.18 with you in
+   sight within 30 m he gives up: throws down his gun, hands up. Sneak right up behind anyone who hasn't reacted:
+   F "Hands up!". A surrendered or knocked-out man: F cuffs him, F again searches his pockets; left alone ~30 s he
+   slips away. Prisoners ignore alarms. The camp's radio operator (the sentry) runs a radio check every 2.5-3.5 min:
+   a man who doesn't answer gets searched for. On an alarm he has to reach the radio and talk for 6 s: stop him and
+   no reinforcements come (explosions and transmissions are still heard far off). Not yet: a hands-up animation.
 6. **Dogs:** guard and patrol dogs, scent tracking (rain, wind, rivers), village dogs and strays. Then a dog of your
    own. Then, inevitably, Private Sausage.
 7. **Modifiers and bonus objectives** in the briefing.

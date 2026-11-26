@@ -82,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest") || a.StartsWith("--moraletest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -207,6 +207,8 @@ public partial class Main : Node3D
 		_guard = AddGuard(_mission.Camp + new Vector3(0, 0, -2), sentry: false);
 		var sentryGuard = AddGuard(_mission.Desk + new Vector3(-.8f, 0, 1.6f), sentry: true);
 		if (op is Mission.Op.Officer or Mission.Op.Capture) _mission.Officer = sentryGuard;
+		sentryGuard.Leader = true;
+		_mission.RadioOperator = sentryGuard;
 		if (op == Mission.Op.Prisoner) _mission.KeyHolder = sentryGuard;
 		// Bigger camps than before: a second patroller always, and a pair roving round the edge.
 		var g2 = AddGuard(_mission.Camp + new Vector3(4, 0, 5), sentry: false);
@@ -399,6 +401,7 @@ public partial class Main : Node3D
 		if (Arg("downtest", "") != "") _ = RunDownTest(Arg("downtest", ""));
 		if (Arg("meleetest", "") != "") _ = RunMeleeTest(Arg("meleetest", ""));
 		if (Arg("rivertest", "") != "") _ = RunRiverTest(Arg("rivertest", ""));
+		if (Arg("moraletest", "") != "") _ = RunMoraleTest(Arg("moraletest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -1305,6 +1308,107 @@ public partial class Main : Node3D
 		File.WriteAllText(Path.Combine(dir, "info.json"), System.Text.Json.JsonSerializer.Serialize(info, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
 		GD.Print($"[debug] dump saved to {dir}");
 		DeadRecon.UI.Hud.Toast($"Debug dump saved ({stamp}). Tell Sage!");
+	}
+
+	/// <summary>Morale and surrender: a radio check misses a man; "hands up" from behind; a firefight where the leader
+	/// and a friend fall and the last man, wounded, falls back and gives up; cuff him, search him; the call for help.</summary>
+	private async Task RunMoraleTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		async Task PressF()
+		{
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = true });
+			await Frames(4);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = false });
+			await Frames(2);
+		}
+		void Kill(Guard g) => g.TakeHit(1000, g.GlobalPosition + Vector3.Up, g.GlobalPosition + Vector3.Right);
+		void LookAt(Vector3 target)
+		{
+			var d = target - _walker.Camera.GlobalPosition;
+			_walker.Look(Mathf.RadToDeg(MathF.Atan2(-d.X, -d.Z)), Mathf.RadToDeg(MathF.Atan2(d.Y, new Vector2(d.X, d.Z).Length())));
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		var camp = _mission.Camp;
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = camp + new Vector3(0, 25, 0);
+		for (int f = 0; f < 1200 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(camp)); f++) await Frames(1);
+		var gs = _mission.Guards.ToList();
+		var op = _mission.RadioOperator!;
+		GD.Print($"[morale] camp of {gs.Count}; radio operator is guard {gs.IndexOf(op)}, leader {op.Leader}");
+		// 1. Hands up from behind, while the camp is calm (the others frozen, so nobody turns round).
+		var hu = gs.First(g => g != op);
+		foreach (var g in gs) g.SetPhysicsProcess(g == hu);
+		var back = hu.GlobalTransform.Basis.Z with { Y = 0 };
+		var at = hu.GlobalPosition + back.Normalized() * 1.5f;
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = at with { Y = _world.HeightAt(at.X, at.Z) + .1f };
+		LookAt(hu.GlobalPosition + Vector3.Up * 1.2f);
+		GD.Print($"[morale] behind him: {hu.GlobalPosition.DistanceTo(_walker.GlobalPosition):0.0} m, he sees {hu.Exposure:0.00}, {hu.State}");
+		await PressF();
+		GD.Print($"[morale] hands up from behind: {hu.State}");
+		await Seconds(.8);
+		await Shot("1_hands_up");
+		int magsBefore = _kit.AllItems.Where(i => i.Def.Kind == DeadRecon.Gear.ItemKind.Magazine).Sum(i => i.Count);
+		await PressF();
+		GD.Print($"[morale] after F: {hu.State}");
+		await Seconds(.4);
+		await PressF();
+		int magsAfter = _kit.AllItems.Where(i => i.Def.Kind == DeadRecon.Gear.ItemKind.Magazine).Sum(i => i.Count);
+		GD.Print($"[morale] searched his pockets: magazines {magsBefore} -> {magsAfter}; dropped guns: {GetTree().GetNodesInGroup("dropped_weapon").Count}");
+		await Shot("2_cuffed");
+		// 2. You leave; a radio check finds him missing.
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = camp + new Vector3(0, 60, 0);
+		foreach (var g in gs) g.SetPhysicsProcess(true);
+		_mission.TestRadioCheck();
+		await Seconds(9);
+		GD.Print($"[morale] after the radio check: {string.Join(", ", gs.Select(g => g.State))}");
+		// 3. A fresh squad of three with the radio operator; you 14 m off, fighting. The leader and one fall, the last is hit.
+		var squad = new System.Collections.Generic.List<Guard>();
+		for (int k = 0; k < 3; k++) { var g = _mission.SpawnGuard!(op.GlobalPosition + new Vector3(3 + k * 2, 0, 2), false, null); _mission.Guards.Add(g); squad.Add(g); }
+		await Frames(5);
+		var last = squad[2];
+		var spot = last.GlobalPosition + new Vector3(10, 0, 9);
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = spot with { Y = _world.HeightAt(spot.X, spot.Z) + .2f };
+		foreach (var g in squad.Append(op)) g.Respond(_walker.GlobalPosition);
+		await Seconds(3);
+		GD.Print($"[morale] fighting: {string.Join(", ", squad.Append(op).Select(g => $"{g.State} {g.Morale:0.00}"))}");
+		Kill(op); await Seconds(.3); Kill(squad[0]); await Seconds(.3); Kill(squad[1]); await Seconds(.3);
+		GD.Print($"[morale] leader and two friends down; last man morale {last.Morale:0.00}");
+		last.TakeHit(12, last.GlobalPosition + Vector3.Up, _walker.GlobalPosition);
+		await Seconds(1.5);
+		GD.Print($"[morale] last man hit: {last.State}, morale {last.Morale:0.00}");
+		await Seconds(5);
+		last.TakeHit(12, last.GlobalPosition + Vector3.Up, _walker.GlobalPosition);
+		for (int k = 0; k < 40 && last.State != Guard.Mood.Surrendered; k++)
+		{
+			var to = last.GlobalPosition + (_walker.GlobalPosition - last.GlobalPosition).Normalized() * 10;
+			_walker.GlobalPosition = to with { Y = _world.HeightAt(to.X, to.Z) + .2f };
+			LookAt(last.GlobalPosition + Vector3.Up);
+			await Seconds(.25);
+		}
+		GD.Print($"[morale] last man: {last.State}, morale {last.Morale:0.00}");
+		var close = last.GlobalPosition + (_walker.GlobalPosition - last.GlobalPosition).Normalized() * 2.5f;
+		_walker.GlobalPosition = close with { Y = _world.HeightAt(close.X, close.Z) + .1f };
+		LookAt(last.GlobalPosition + Vector3.Up);
+		await Seconds(.6);
+		await Shot("3_surrendered");
+		await Seconds(3);
+		GD.Print($"[morale] reinforcements: {_mission.Reinforcements}");
+		GetTree().Quit();
 	}
 
 	private static int _resumeStage;

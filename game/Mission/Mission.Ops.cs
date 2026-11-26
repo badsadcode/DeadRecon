@@ -303,7 +303,7 @@ public partial class Mission
                 guard.Route = _route; guard.RouteStart = 0; guard.Home = _route[0];
             });
             Guards.Add(g); _targets.Add(g);
-            if (k == 0) _leader = g;
+            if (k == 0) { _leader = g; g.Leader = true; }
         }
         GD.Print($"[mission] the patrol sets off, {Flat(_route[0] - Camp):0} m up the road");
     }

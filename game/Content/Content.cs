@@ -139,7 +139,15 @@ public static class Content
     public static string[] Strings(string key, string[] fallback) => Get(key, fallback);
 
     /// <summary>Lines by kind ("sentry", "hurt"...).</summary>
-    public static Dictionary<string, string[]> LineSets(string key, Dictionary<string, string[]> fallback) => Get(key, fallback);
+    public static Dictionary<string, string[]> LineSets(string key, Dictionary<string, string[]> fallback)
+    {
+        // Kinds the data doesn't have (new in the code, or an older lines.json) keep their built-in lines.
+        var got = Get(key, fallback);
+        if (ReferenceEquals(got, fallback)) return fallback;
+        var merged = new Dictionary<string, string[]>(fallback);
+        foreach (var (kind, lines) in got) merged[kind] = lines;
+        return merged;
+    }
 
     /// <summary>Writes every section (shipped or default) to one file per section group, for editing.</summary>
     public static void Dump(string dir, Dictionary<string, string[]> files)

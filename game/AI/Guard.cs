@@ -19,7 +19,7 @@ namespace DeadRecon.AI;
 /// </summary>
 public partial class Guard : CharacterBody3D, IDamageable
 {
-    public enum Mood { Patrol, Suspicious, Investigate, Alert, Search, Dead, Captive, Unconscious, Restrained }
+    public enum Mood { Patrol, Suspicious, Investigate, Alert, Search, Dead, Captive, Unconscious, Restrained, Surrendered }
 
     public Walker Target = null!;
     public TerrainStreamer Terrain = null!;
@@ -138,6 +138,13 @@ public partial class Guard : CharacterBody3D, IDamageable
         ["tree"] = new[] { "Did a tree just... fall over? By itself?", "TIMBER! ...wait. Who said that?", "The jungle is falling apart. Like my career.",
                            "Trees don't just DO that." },
         ["squashed"] = new[] { "...a TREE? Seriously?", "...killed by... forestry..." },
+        ["fallback"] = new[] { "Fall back! FALL BACK!", "Nope. Nope nope nope.", "I'm not paid enough for THIS!", "Regrouping! Very far away!" },
+        ["surrender"] = new[] { "Don't shoot! DON'T SHOOT!", "I give up! I give up! Look, hands!", "Okay! Okay! I'm out! I was never in!" },
+        ["handsup"] = new[] { "...oh. Oh no.", "Alright, alright! Hands. See? Hands.", "Don't tell the sergeant." },
+        ["leaderdown"] = new[] { "The sergeant's down! What do we DO?!", "Who's in charge now?! Not me! NOT ME!" },
+        ["radiocheck"] = new[] { "Radio check. Everyone sound off.", "Check-in time. Talk to me, people.", "Radio check! ...somebody? Anybody?" },
+        ["missing"] = new[] { "{0}? ...{0}! Answer me!", "{0}'s not answering. Go and look. NOW.", "Where's {0}? Somebody check on {0}." },
+        ["calling"] = new[] { "Base, base, this is the camp! We're under attack!", "Contact! Send everyone! Send the cook!", "Mayday! Mayday! Er, contact! Send help!" },
     };
 
     public override void _Ready()
@@ -184,7 +191,8 @@ public partial class Guard : CharacterBody3D, IDamageable
         if (State == Mood.Dead) { Fall(dt); return; }
         if (!Terrain.HasCollisionAt(GlobalPosition)) return; // no ground loaded under him yet: stand still (far from the player)
         if (State == Mood.Captive) { CaptiveTick(dt); return; }
-        if (State is Mood.Unconscious or Mood.Restrained) { OutTick(dt); return; }
+        if (State is Mood.Unconscious or Mood.Restrained or Mood.Surrendered) { OutTick(dt); return; }
+        HandsUpPrompt();
 
         _stateTime += dt;
         Perceive(dt);
@@ -327,6 +335,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         {
             case Mood.Patrol:
             {
+                Morale = Mathf.MoveToward(Morale, 1, dt * .01f);
                 if (Suspicion >= .3f) { _sitting = 0; Enter(Mood.Suspicious, "suspicious"); return (here, 0, _lastKnown); }
                 if (VisibleComrade(30) is { } stranger) { _sitting = 0; _lastKnown = stranger.GlobalPosition; EnterAlert(); Bark("alert"); return (here, 0, stranger.GlobalPosition); }
                 _mutter -= dt;
@@ -380,6 +389,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
             case Mood.Alert:
             {
+                if (Nerve(dt, here) is { } scared) return scared;
                 // Flanker: circle round to the player's side while the other guard keeps him busy.
                 if (_flankPoint is { } fp)
                 {
@@ -467,6 +477,8 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void Enter(Mood mood, string? line = null)
     {
+        // Prisoners and the knocked-out don't answer alarms or join fights (only death changes that).
+        if ((Out || Captive) && mood != Mood.Dead) return;
         if (State != mood) GD.Print($"[guard] {State} -> {mood} (suspicion {Suspicion:0.00}, sees player {_seen})");
         State = mood;
         _stateTime = 0;
@@ -476,6 +488,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void EnterAlert()
     {
+        if (Out || Captive) return;
         bool fresh = State != Mood.Alert;
         if (fresh) TimesAlerted++;
         Suspicion = 1;
@@ -598,7 +611,7 @@ public partial class Guard : CharacterBody3D, IDamageable
     // ================================================================= melee: knocked out, cuffed
 
     /// <summary>Out of the fight without being dead: knocked out (wakes up in a while) or cuffed (stays put).</summary>
-    public bool Out => State is Mood.Unconscious or Mood.Restrained;
+    public bool Out => State is Mood.Unconscious or Mood.Restrained or Mood.Surrendered;
     private float _koLeft;
     private bool _fWasOut;
     private float _mumble;
@@ -613,8 +626,10 @@ public partial class Guard : CharacterBody3D, IDamageable
             if (State == Mood.Alert) Say("OW! You—");
             return;
         }
+        bool wasUp = !Out;
         State = Mood.Unconscious;
         Bolting = false;
+        if (wasUp) Fallen();
         _koLeft = 50 + Looks.Randf() * 30;
         Lie(true);
         GD.Print($"[guard] {Name} knocked out ({_koLeft:0} s)");
@@ -623,8 +638,11 @@ public partial class Guard : CharacterBody3D, IDamageable
     /// <summary>Cuffed: he isn't going anywhere, now or later.</summary>
     public void Restrain()
     {
-        if (State != Mood.Unconscious) return;
+        if (State is not (Mood.Unconscious or Mood.Surrendered)) return;
+        bool wasUp = State == Mood.Surrendered;
         State = Mood.Restrained;
+        if (wasUp && _body != null) _body.Crouch = 1;   // kneeling, hands tied
+        Say(wasUp ? "...ow. Not so tight." : "Mmmf?");
         if (_body != null) _body.GunVisible = false;
         if (_gunPivot != null) _gunPivot.Visible = false;
         GD.Print($"[guard] {Name} cuffed");
@@ -639,6 +657,24 @@ public partial class Guard : CharacterBody3D, IDamageable
         shape.Rotation = rot;
         shape.Position = down ? new Vector3(0, .3f, .85f) : new Vector3(0, .9f, 0);
         if (_body != null) { _body.Speed = 0; _body.Ready = 0; _body.Crouch = 0; }
+    }
+
+    private bool _fWasHands;
+
+    /// <summary>Right behind (or beside) a guard who hasn't spotted you: F, "Hands up!". (Not the capture job's
+    /// officer: that step asks you itself.)</summary>
+    private void HandsUpPrompt()
+    {
+        bool f = Input.IsPhysicalKeyPressed(Key.F) && Input.MouseMode == Input.MouseModeEnum.Captured, pressed = f && !_fWasHands;
+        _fWasHands = f;
+        if (State is not (Mood.Patrol or Mood.Suspicious or Mood.Investigate) || Target.Dead) return;
+        if (Target.GlobalPosition.DistanceTo(GlobalPosition) > 2.3f) return;
+        // Not in front of his face (inside 4 m he senses you anyway; what matters is he hasn't turned round yet).
+        var toYou = (Target.GlobalPosition - GlobalPosition) with { Y = 0 };
+        if ((-GlobalTransform.Basis.Z).Dot(toYou.Normalized()) > .5f) return;
+        if (DeadRecon.Missions.Mission.Current is { Kind: DeadRecon.Missions.Mission.Op.Capture } op && op.Officer == this) return;
+        DeadRecon.UI.Hud.Prompt("F   \"Hands up!\"      G   the rifle butt");
+        if (pressed) GiveUp();
     }
 
     private void OutTick(float dt)
@@ -660,6 +696,20 @@ public partial class Guard : CharacterBody3D, IDamageable
             DeadRecon.UI.Hud.Prompt("F   Cuff him");
             if (fPressed) { Restrain(); return; }
         }
+        if (State == Mood.Surrendered)
+        {
+            // Hands up, waiting. Left alone too long (or you're down), he slips away into the jungle.
+            Move(GlobalPosition, 0, Target.GlobalPosition, dt);
+            bool watched = !Target.Dead && Target.GlobalPosition.DistanceTo(GlobalPosition) < 35;
+            _koLeft -= watched ? dt * .15f : dt;
+            if (_koLeft <= 0)
+            {
+                State = Mood.Captive; Bolting = true;
+                Say("...!");
+                GD.Print($"[guard] {Name} slipped away");
+            }
+            return;
+        }
         _koLeft -= dt;
         if (_koLeft > 0) return;
         // Awake, with a headache and a grudge.
@@ -673,6 +723,87 @@ public partial class Guard : CharacterBody3D, IDamageable
     // ================================================================= captured (docs/MISSIONS_PLAN.md: capture is physical)
 
     public bool Captive => State == Mood.Captive;
+
+    // ================================================================= morale (docs/MISSIONS_PLAN.md, section 4)
+
+    /// <summary>0..1. Drops when a friend near him goes down (a lot if it's their leader), when he's hit, and while he
+    /// fights alone; comes back slowly when it's quiet. Low: he falls back. Very low, with you close and in sight:
+    /// he gives up.</summary>
+    public float Morale { get; private set; } = 1;
+    /// <summary>The one the others look to (the camp sentry, a patrol's first man). His fall hits them hardest.</summary>
+    public bool Leader;
+    private float _fleeFor;
+    private bool _fledOnce;
+
+    /// <summary>Something bad happened near him.</summary>
+    public void LoseHeart(float amount) { if (State is not (Mood.Dead or Mood.Captive or Mood.Unconscious or Mood.Restrained or Mood.Surrendered)) Morale = Math.Max(0, Morale - amount); }
+
+    /// <summary>A guard fell (dead or out): everyone who'd notice, nearby, loses heart.</summary>
+    private void Fallen()
+    {
+        foreach (var g in All)
+        {
+            if (g == this || g.State is Mood.Dead || g.Out || g.Captive) continue;
+            float d = g.GlobalPosition.DistanceTo(GlobalPosition);
+            if (d > 45) continue;
+            g.LoseHeart(Leader ? .4f : .22f);
+            if (Leader && d < 30 && g.State == Mood.Alert) g.Bark("leaderdown");
+        }
+    }
+
+    private int FriendsNear(float range)
+    {
+        int n = 0;
+        foreach (var g in All)
+            if (g != this && g.State is not (Mood.Dead or Mood.Captive or Mood.Unconscious or Mood.Restrained or Mood.Surrendered) && g.GlobalPosition.DistanceTo(GlobalPosition) < range) n++;
+        return n;
+    }
+
+    /// <summary>Morale while fighting: alone is frightening, a long quiet calms. Then: fall back, or give up.
+    /// Returns a move when he's falling back (null otherwise).</summary>
+    private (Vector3, float, Vector3?)? Nerve(float dt, Vector3 here)
+    {
+        if (FriendsNear(30) == 0) Morale = Math.Max(0, Morale - dt * .015f);
+        float dist = Target.GlobalPosition.DistanceTo(here);
+        if (Morale < .18f && _seen && dist < 30 && !Target.Dead)
+        {
+            GiveUp("surrender");
+            return (here, 0, Target.GlobalPosition);
+        }
+        if (_fleeFor > 0)
+        {
+            _fleeFor -= dt;
+            var away = (here - Target.GlobalPosition) with { Y = 0 };
+            away = away.LengthSquared() > .01f ? away.Normalized() : -GlobalTransform.Basis.Z;
+            return (here + away * 8, RunSpeed, null);
+        }
+        if (Morale < .3f && !_fledOnce)
+        {
+            _fledOnce = true;
+            _fleeFor = _rng.RandfRange(7, 11);
+            _cover = null; _peeking = false; _flankPoint = null;
+            Bark("fallback");
+            GD.Print($"[guard] {Name} falls back (morale {Morale:0.00})");
+        }
+        return null;
+    }
+
+    /// <summary>Hands up: drops his gun, stands still. F near him: restrain and search him.</summary>
+    public void GiveUp(string line = "handsup")
+    {
+        if (State is Mood.Dead or Mood.Surrendered or Mood.Restrained) return;
+        if (Out) Lie(false);
+        State = Mood.Surrendered;
+        _fleeFor = 0; _cover = null; _flankPoint = null;
+        _koLeft = 30;   // how long he'll wait if you leave him (then he slips away)
+        _fWasOut = true;  // the F that said "hands up" isn't also the one that cuffs him
+        _body?.ThrowDownGun(GlobalTransform.Basis.Z);
+        if (_gunPivot != null) _gunPivot.Visible = false;
+        if (_body != null) { _body.Ready = 0; _body.Speed = 0; }
+        Bark(line);
+        Fallen();
+        GD.Print($"[guard] {Name} surrendered (morale {Morale:0.00})");
+    }
     /// <summary>A captive who's legging it.</summary>
     public bool Bolting { get; private set; }
     /// <summary>A captive who got clean away.</summary>
@@ -703,7 +834,12 @@ public partial class Guard : CharacterBody3D, IDamageable
         _fWasCaptive = f;
         if (Bolting)
         {
-            if (d > 45) { Escaped = true; return; }
+            if (d > 45)
+            {
+                Escaped = true;
+                if (DeadRecon.Missions.Mission.Current?.Captive != this) { GD.Print($"[guard] {Name} got away"); QueueFree(); }
+                return;
+            }
             if (d < 2.5f && !Target.Dead)
             {
                 DeadRecon.UI.Hud.Prompt("F   \"Get back here.\"");
@@ -734,7 +870,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void HearAlarm(Vector3 where)
     {
-        if (State is Mood.Alert or Mood.Dead) return;
+        if (State is Mood.Alert or Mood.Dead || Out || Captive) return;
         // Head for fighting distance on his own side of the trouble, not into the middle of it.
         var back = GlobalPosition - where; back.Y = 0;
         float d = back.Length();
@@ -824,6 +960,8 @@ public partial class Guard : CharacterBody3D, IDamageable
         bool squashed = damage >= 60; // only falling trees hit that hard
         if (!squashed) Effects.BloodHit(this, at, at - from);
         if (Health <= 0) { Die(squashed, at, at - from); return; }
+        if (Out || Captive) { Say("OW! I SURRENDERED!"); return; }   // shooting prisoners: he stays a prisoner (and remembers)
+        Morale = Math.Max(0, Morale - .15f);
         _lastKnown = from;          // he felt where that came from
         EnterAlert();
         Bark("hurt");
@@ -844,7 +982,9 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private void Die(bool squashed, Vector3 at, Vector3 shotDir)
     {
+        bool counted = !Out && !Captive;   // (a prisoner's death was already counted when he gave up)
         Enter(Mood.Dead, squashed ? "squashed" : "dead");
+        if (counted) Fallen();
         _body?.Ragdoll(at, squashed ? Vector3.Down : shotDir, squashed ? 2 : 1);
         _deathTime = 0;
         _icon.Visible = false;
@@ -1075,6 +1215,13 @@ public partial class Guard : CharacterBody3D, IDamageable
             _voice.Play();
         }
         GD.Print($"[guard] \"{line}\"");
+    }
+
+    /// <summary>A line of a kind, with {0} filled in (names).</summary>
+    public void SayLine(string kind, string name = "")
+    {
+        var lines = DeadRecon.Data.Content.LineSets("guard_lines", Lines)[kind];
+        Say(string.Format(lines[_rng.RandiRange(0, lines.Length - 1)], name));
     }
 
     private void Bark(string kind)

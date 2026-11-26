@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using DeadRecon.AI;
 using DeadRecon.Base;
 using DeadRecon.Gear;
@@ -634,7 +635,7 @@ public partial class Mission : Node3D
         if (Kind == Op.None) { _marker.Visible = false; return; }
         float dt = (float)delta;
         if (_fireLight != null) _fireLight.LightEnergy = 2f + MathF.Sin((float)Time.GetTicksMsec() * .013f) * .3f + MathF.Sin((float)Time.GetTicksMsec() * .031f) * .2f;
-        if (State is Phase.Intel or Phase.Extract) { Elapsed += delta; Reinforce(dt); AutoSave(dt); }
+        if (State is Phase.Intel or Phase.Extract) { Elapsed += delta; Reinforce(dt); RadioChecks(dt); AutoSave(dt); }
 
         if (Now is { } step)
         {
@@ -664,14 +665,70 @@ public partial class Mission : Node3D
 
     /// <summary>Once the camp raises the alarm (or you send their radio's secrets), a squad comes running from
     /// outside about a minute later.</summary>
+    /// <summary>The camp's radio operator (the sentry at the desk): he checks in on everyone, and calls for help.</summary>
+    public Guard? RadioOperator;
+    private float _callFor = -1, _radioCheck = 160, _missingAnswer = -1;
+    private bool _callLost;
+    private Guard? _missing;
+    private readonly HashSet<Guard> _reported = new();
+    private static readonly string[] CampNames = { "Dao", "Minh", "Sombat", "Kiet", "Lanh", "Phong", "Tuan", "Bao", "Chien", "Hung" };
+
+    /// <summary>Tests: a radio check right now.</summary>
+    public void TestRadioCheck() => _radioCheck = 0;
+
+    private void StartReinforcements(float seconds)
+    {
+        _reinforceIn = seconds;
+        GD.Print($"[mission] help called: reinforcements in {_reinforceIn:0} s");
+    }
+
+    /// <summary>Every few minutes, a radio check: somebody who doesn't answer (dead, knocked out, tied up somewhere)
+    /// gets searched for, from where he was last.</summary>
+    private void RadioChecks(float dt)
+    {
+        if (!HasCamp(Kind) || RadioOperator is not { } op || !IsInstanceValid(op) || op.State == Guard.Mood.Dead || op.Out || op.Captive) return;
+        if (_missingAnswer >= 0)
+        {
+            _missingAnswer -= dt;
+            if (_missingAnswer > 0 || _missing == null) return;
+            _missingAnswer = -1;
+            if (!IsInstanceValid(_missing)) return;
+            int i = Guards.IndexOf(_missing);
+            op.SayLine("missing", CampNames[Math.Max(0, i) % CampNames.Length]);
+            foreach (var g in Guards.Take(_campGuards))
+                if (IsInstanceValid(g) && g != op && g.State is Guard.Mood.Patrol or Guard.Mood.Suspicious) g.Respond(_missing.GlobalPosition);
+            GD.Print($"[mission] radio check: {CampNames[Math.Max(0, i) % CampNames.Length]} is missing; they go and look");
+            return;
+        }
+        _radioCheck -= dt;
+        if (_radioCheck > 0) return;
+        _radioCheck = _rng.RandfRange(150, 220);
+        if (op.State != Guard.Mood.Patrol) return;
+        op.SayLine("radiocheck");
+        _missing = Guards.Take(_campGuards).FirstOrDefault(g => IsInstanceValid(g) && g != op && (g.State == Guard.Mood.Dead || g.Out || g.Captive) && !_reported.Contains(g));
+        if (_missing != null) { _reported.Add(_missing); _missingAnswer = 6; }
+    }
+
     private void Reinforce(float dt)
     {
         if (_reinforced || SpawnGuard == null) return;
         if (_commsCut && _reinforceIn < 0) return;   // their mast is down: nobody to call
         if (_reinforceIn < 0)
         {
-            bool alarm = Guards.Exists(g => g.TimesAlerted > 0) || Loud;
-            if (alarm) { _reinforceIn = Transmitted ? 35 : _bang > 1 ? 25 : _rng.RandfRange(45, 75); GD.Print($"[mission] alarm: reinforcements in {_reinforceIn:0} s"); }
+            // Something loud (their radio sending your message, an explosion) is heard far away: help comes anyway.
+            if (Loud) { StartReinforcements(Transmitted ? 35 : _bang > 1 ? 25 : 50); return; }
+            if (!Guards.Exists(g => g.TimesAlerted > 0)) return;
+            // An alarm in the camp: the radio operator has to get to the radio and make the call. Stop him first,
+            // and nobody comes (docs/MISSIONS_PLAN.md: "cutting the radio first becomes a real tactic").
+            if (RadioOperator is not { } op || !IsInstanceValid(op) || op.State == Guard.Mood.Dead || op.Out || op.Captive)
+            {
+                if (_callFor > 0 && !_callLost) { _callLost = true; Hud("Their radio operator never made the call."); GD.Print("[mission] the call never went out"); }
+                return;
+            }
+            if (_callFor < 0) { _callFor = 0; op.Respond(_desk); GD.Print("[mission] radio operator heading for the radio"); }
+            if (op.GlobalPosition.DistanceTo(_desk) > 3) return;
+            _callFor += dt;
+            if (_callFor > 6) { op.SayLine("calling"); StartReinforcements(_rng.RandfRange(45, 70)); }
             return;
         }
         _reinforceIn -= dt;
