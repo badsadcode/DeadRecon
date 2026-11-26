@@ -83,6 +83,33 @@ public partial class Hud : Control
     private float Heading => Bearing(-Player.Camera.GlobalTransform.Basis.Z);
     private static float Wrap(float a) => (a + 540) % 360 - 180;
 
+    /// <summary>You're down: how bad, how long, what you can still do, and whether anyone's coming.</summary>
+    private void DrawDown(Vector2 size)
+    {
+        float y = size.Y * .38f;
+        Text(new Vector2(0, y), "DOWN", 46, Danger, HorizontalAlignment.Center, size.X);
+        string wound = Player.Wound switch
+        {
+            Walker.WoundLevel.Light => "Light wound. You can still fight.",
+            Walker.WoundLevel.Bad => "Bad wound. Crawl. Shout. Hope.",
+            _ => "Critical. You can't move. Someone has to come.",
+        };
+        Text(new Vector2(0, y + 58), wound, 20, Ink, HorizontalAlignment.Center, size.X);
+        Text(new Vector2(0, y + 88), $"Bleeding out: {Player.BleedLeft:0} s", 18, Player.BleedLeft < 20 ? Danger : Amber, HorizontalAlignment.Center, size.X);
+        string can = Player.SelfDressing ? "Pressing a dressing on it..."
+                   : Player.Wound switch
+                   {
+                       Walker.WoundLevel.Light => "WASD crawl   ·   LMB fire (they'll see you)   ·   H dress it yourself   ·   F shout for help",
+                       Walker.WoundLevel.Bad => "WASD crawl   ·   F shout for help (everyone hears)",
+                       _ => "Stay still.",
+                   };
+        Text(new Vector2(0, y + 118), can, 15, Dim, HorizontalAlignment.Center, size.X);
+        string? coming = DeadRecon.People.Comrade.Coming is { } who ? $"{who} is coming for you."
+                       : DeadRecon.People.Villager.Coming ? "Someone from the village heard you. They're coming."
+                       : null;
+        if (coming != null) Text(new Vector2(0, y + 150), coming, 18, new Color(.7f, .95f, .7f), HorizontalAlignment.Center, size.X);
+    }
+
     private void Text(Vector2 at, string s, int size, Color c, HorizontalAlignment align = HorizontalAlignment.Left, float width = -1)
     {
         DrawString(_font, at + new Vector2(1.5f, 1.5f), s, align, width, size, Shadow);
@@ -125,6 +152,7 @@ public partial class Hud : Control
 
         var size = GetViewportRect().Size;
         var centre = size / 2;
+        if (Player.Down && !KitScreen.IsOpen) { DrawDown(size); return; }
         if (Player.Dead || KitScreen.IsOpen) return;
 
         DrawCompass(new Vector2(centre.X, 34), 560);

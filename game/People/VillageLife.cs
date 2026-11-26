@@ -232,6 +232,7 @@ public partial class VillageLife : Node
             }
             return;
         }
+        if (Player.Dead) return;   // no chatting from the ground (F is your shout for help)
         foreach (var (index, folk) in _folk)
         {
             var h = folk.Headman;

@@ -154,6 +154,8 @@ public partial class Weapon : Node3D
     public override void _Process(double delta)
     {
         if (!Loaded) return;
+        // Down too badly to shoot: the rifle drops out of view.
+        Visible = !Walker.Down || Walker.CanShoot;
         float dt = (float)delta;
         bool captured = Input.MouseMode == Input.MouseModeEnum.Captured;
         bool wantAim = _forceAim || (captured && Input.IsMouseButtonPressed(MouseButton.Right) && !Reloading);
@@ -222,7 +224,8 @@ public partial class Weapon : Node3D
 
     private void Fire()
     {
-        if (Walker.Dead) return;
+        if (!Walker.CanShoot) return;
+        Walker.SinceShot = 0;
         if (Kit.Current == null || !Kit.Current.Shoot()) { _click.Play(); _cooldown = .25f; return; }
         ShotsFired++;
         _cooldown = 60f / RoundsPerMinute;

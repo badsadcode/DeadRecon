@@ -82,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -394,6 +394,7 @@ public partial class Main : Node3D
 		if (Arg("snaketest", "") != "") _ = RunSnakeTest(Arg("snaketest", ""));
 		if (Arg("rocktest", "") != "") _ = RunRockTest(Arg("rocktest", ""));
 		if (Arg("resumetest", "") != "") _ = RunResumeTest(Arg("resumetest", ""));
+		if (Arg("downtest", "") != "") _ = RunDownTest(Arg("downtest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -444,7 +445,8 @@ public partial class Main : Node3D
 			(_weather.Intensity > .05f ? $"   footsteps carry {Hearing.Carry(Hearing.RunningSteps):0}/{Hearing.RunningSteps:0} m, guard sees {_weather.SightFactor * 100:0}% as far\n" : "\n") +
 			(_waitingForGround ? "loading ground...\n" : "") +
 			"click: grab mouse   WASD/Shift/Space  C crouch (hold) / Alt toggle  Q/E lean   LMB fire  RMB aim  R reload   F: take/talk/search  Tab: kit  M: map  H: dressing  L: light  F10: fly (Space/Ctrl up/down)   N: weather  K: +2 hours   T: textured/painted ground   Esc: release mouse";
-		_hurt.Color = new Color(.6f, 0, 0, _walker.Dead ? .35f : _walker.HurtFlash * .45f);
+		_hurt.Color = new Color(.6f, 0, 0, _walker.Down ? .22f + .12f * MathF.Sin((float)Time.GetTicksMsec() * .004f) + _walker.HurtFlash * .3f
+			: _walker.Dead ? .35f : _walker.HurtFlash * .45f);
 		_deathText.Visible = false; // the mission panel says it
 		_crosshair.Visible = _weapon.AimAmount < .5f;
 	}
@@ -466,7 +468,7 @@ public partial class Main : Node3D
 			_terrain.TextureMix = _terrain.TextureMix > .5f ? 0 : 1;
 		// Dead or done: Enter starts a new operation (same jungle, new camp; felled trees stay felled).
 		if (e is InputEventKey { Pressed: true, Echo: false, PhysicalKeycode: Key.Enter or Key.KpEnter } && _mission != null
-			&& (_walker.Dead || _mission.State == Mission.Phase.Failed || (_mission.State == Mission.Phase.Complete && DeadRecon.Base.HomeBase.Saved == null)))
+			&& (_walker.Gone || _mission.State == Mission.Phase.Failed || (_mission.State == Mission.Phase.Complete && DeadRecon.Base.HomeBase.Saved == null)))
 		{
 			// No home yet: the next operation starts where you're standing. With a home (or after dying), back home.
 			if (!_walker.Dead && !_walker.Flying && DeadRecon.Base.HomeBase.Saved == null)
@@ -949,6 +951,112 @@ public partial class Main : Node3D
 	}
 
 	/// <summary>Animals: the nearest village's dogs and livestock, then wildlife beside you, then a gunshot.</summary>
+	/// <summary>Going down: a light wound (shoot, dress it yourself), a critical one with your squad near (they come),
+	/// a bad one in a friendly village after shouting (a villager comes), and bleeding out alone (the operation fails).</summary>
+	private async Task RunDownTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		async Task PressF()
+		{
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = true });
+			await Frames(3);
+			Input.ParseInputEvent(new InputEventKey { PhysicalKeycode = Godot.Key.F, Keycode = Godot.Key.F, Pressed = false });
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		foreach (var g in _guards) { g.SetPhysicsProcess(false); g.SetProcess(false); }
+		Input.MouseMode = Input.MouseModeEnum.Captured;
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		_walker.Invulnerable = false;
+
+		// 1. Light: one hit that only just puts you down.
+		_walker.TakeHit(85, _walker.Chest, _walker.Chest + Vector3.Forward);
+		_walker.TakeHit(30, _walker.Chest, _walker.Chest + Vector3.Forward);
+		GD.Print($"[downtest] 1: down {_walker.Down}, wound {_walker.Wound}, bleed {_walker.BleedLeft:0} s, can shoot {_walker.CanShoot}, spottable {_walker.Spottable}");
+		_walker.SinceShot = 0;
+		GD.Print($"[downtest] 1: after firing, spottable {_walker.Spottable}");
+		await Seconds(1);
+		await Shot("1_light");
+		_kit.UseMedical(null);
+		GD.Print($"[downtest] 1: dressing it yourself: {_walker.SelfDressing}");
+		await Seconds(7.5);
+		GD.Print($"[downtest] 1: after the dressing: down {_walker.Down}, health {_walker.Health:0}, bleed {_walker.BleedLeft:0}");
+		if (_walker.Down) _walker.Revive(60);
+
+		// 2. Critical, with the squad near.
+		var faces = DeadRecon.AI.SoldierBody.Catalogue();
+		var awayFromCamp = (_spawn.position - _mission.Camp) with { Y = 0 };
+		for (int k = 0; k < 24; k++)
+		{
+			var at = _mission.Camp + awayFromCamp.Normalized().Rotated(Vector3.Up, k * .5f) * (300 + k * 10);
+			at.Y = _world.HeightAt(at.X, at.Z);
+			if (DeadRecon.Base.HomeBase.Establish(at, 0, _world) == null) break;
+		}
+		foreach (var n in new[] { "Sergeant Okafor", "Private Santos" }) DeadRecon.Base.HomeBase.AddSoldier(n, faces[Math.Abs(n.GetHashCode()) % faces.Count]);
+		_squadNode!.OnOperation = true;
+		_squadNode.Muster();
+		await Seconds(3);
+		_walker.SetHealth(100);
+		_walker.TakeHit(170, _walker.Chest, _walker.Chest + Vector3.Forward);
+		GD.Print($"[downtest] 2: down {_walker.Down}, wound {_walker.Wound}, squad {_squadNode.Team.Count}, can crawl {_walker.CanCrawl}");
+		await Seconds(2.5);
+		var cam = new Camera3D { Fov = 60 };
+		AddChild(cam);
+		cam.GlobalPosition = _walker.GlobalPosition + new Vector3(3, 2.2f, 3);
+		cam.LookAt(_walker.GlobalPosition + Vector3.Up * .4f);
+		cam.MakeCurrent();
+		await Shot("2_squad_coming");
+		_walker.Camera.MakeCurrent();
+		await Shot("2b_your_view");
+		double t0 = Time.GetTicksMsec();
+		for (int f = 0; f < 1500 && _walker.Down; f++) await Frames(1);
+		GD.Print($"[downtest] 2: down {_walker.Down} after {(Time.GetTicksMsec() - t0) / 1000:0.0} s, health {_walker.Health:0}");
+
+		// 3. Bad, in a village that likes you, after shouting. (Squad sent home first.)
+		_squadNode.StandDown();
+		var village = _towns.Sites.Where(s => s.Kind == "village").OrderBy(s => s.Centre.DistanceTo(_walker.GlobalPosition)).First();
+		DeadRecon.People.Support.Change(village.Index, 80, "test");
+		var vAt = village.Centre + new Vector3(6, 0, 6);
+		_walker.SetFlying(true);
+		_walker.GlobalPosition = vAt + Vector3.Up * 20;
+		for (int f = 0; f < 2400 && (_life.Population == 0 || !_terrain.Settled || !_terrain.HasCollisionAt(vAt)); f++) await Frames(1);
+		_walker.SetFlying(false);
+		_walker.GlobalPosition = vAt with { Y = _world.HeightAt(vAt.X, vAt.Z) + .3f };
+		await Seconds(2);
+		_walker.SetHealth(100);
+		_walker.TakeHit(140, _walker.Chest, _walker.Chest + Vector3.Forward);
+		GD.Print($"[downtest] 3: in {village.Name} ({DeadRecon.People.Support.LevelAt(village.Index)}): down {_walker.Down}, wound {_walker.Wound}");
+		await PressF();
+		await Seconds(1);
+		GD.Print($"[downtest] 3: shouted; someone coming: {DeadRecon.People.Villager.Coming}");
+		await Seconds(4);
+		cam.GlobalPosition = _walker.GlobalPosition + new Vector3(3, 2.2f, 3);
+		cam.LookAt(_walker.GlobalPosition + Vector3.Up * .4f);
+		cam.MakeCurrent();
+		await Shot("3_villager_coming");
+		for (int f = 0; f < 2400 && _walker.Down; f++) await Frames(1);
+		GD.Print($"[downtest] 3: down {_walker.Down}, health {_walker.Health:0}");
+		_walker.Camera.MakeCurrent();
+
+		// 4. Alone: hit while down until it's over. The operation fails.
+		_walker.SetHealth(100);
+		_walker.GlobalPosition = _spawn.position;
+		_walker.TakeHit(140, _walker.Chest, _walker.Chest + Vector3.Forward);
+		_walker.TakeHit(10, _walker.Chest, _walker.Chest + Vector3.Forward);
+		GD.Print($"[downtest] 4: hit again: {_walker.Wound}, bleed {_walker.BleedLeft:0}");
+		_walker.TakeHit(10, _walker.Chest, _walker.Chest + Vector3.Forward);
+		await Seconds(.5);
+		GD.Print($"[downtest] 4: gone {_walker.Gone}; mission {_mission.State}");
+		GetTree().Quit();
+	}
+
 	private static int _resumeStage;
 
 	/// <summary>Save mid-operation and carry on: a prisoner rescue played to "he's following you", one guard shot,

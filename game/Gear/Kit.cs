@@ -382,6 +382,18 @@ public partial class Kit : Node
     /// <summary>Use a dressing or a rice parcel (null: the best one for the job, vest first).</summary>
     public void UseMedical(Item? item)
     {
+        if (Player.Down)
+        {
+            if (Player.Wound != Walker.WoundLevel.Light) { Hud.Toast("You can't reach it. Shout for help (F), or wait for your squad."); return; }
+            var d = item ?? Vest.Items.FirstOrDefault(i => i.Def == ItemDef.Bandage) ?? Pack.Items.FirstOrDefault(i => i.Def == ItemDef.Bandage);
+            if (d == null) { Hud.Toast("No dressings. That's... not ideal."); return; }
+            if (!Player.StartSelfDressing()) return;
+            d.Count--;
+            if (d.Count <= 0) GridOf(d)?.Items.Remove(d);
+            Hud.Toast("Pressing a dressing on it. Hands steady. Steadier. Come on...");
+            Changed?.Invoke(); Save();
+            return;
+        }
         if (Player.Dead) return;
         item ??= Vest.Items.FirstOrDefault(i => i.Def == ItemDef.Bandage) ?? Pack.Items.FirstOrDefault(i => i.Def == ItemDef.Bandage)
               ?? AllItems.FirstOrDefault(i => i.Def.Kind == ItemKind.Medical);

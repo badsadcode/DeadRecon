@@ -269,7 +269,13 @@ Each step is playable on its own.
    camp (kind + seed + where it was planned from), you where you stood, the hour, the step, the dead where they fell,
    escorts following. Steps carry a `Replay` for their mark on the world.
 3. **Going down and being rescued** (wound levels, crawling, calling for help; squad, villagers and medic come for
-   you). Lays the co-op rule's foundation.
+   you). Lays the co-op rule's foundation. **Done (2026-11-26):** the hit that puts you down sets the wound (light,
+   bad, critical; every hit while down makes it one worse; a huge one kills outright). Bleed-out 100/70/45 s. Light:
+   crawl, shoot (and become visible again), dress it yourself (H, 7 s, ~55%). Bad: crawl, shout (F, everyone within
+   ~45 m hears, enemies too). Critical: wait. One squadmate comes and patches you up (35 health); if you shouted, a
+   villager from a Friendly or Loyal village comes (25). Guards lose track of a downed man who keeps quiet. The
+   operation fails only when you bleed out (`Walker.Gone`): the hook for co-op's "all players down" rule.
+   Not yet: the camp medic, squadmates smoking/suppressing before they come.
 4. **Ten new missions:**
    - photo recon
    - eavesdrop

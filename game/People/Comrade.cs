@@ -119,6 +119,7 @@ public partial class Comrade : CharacterBody3D, IDamageable
         float dt = (float)delta;
         UpdateLabels(dt);
         if (Down) { BleedOut(dt); return; }
+        if (Player.Down && Orders != Order.Base && Rescue(dt)) return;
 
         // Who's there to shoot?
         _scan -= dt;
@@ -176,6 +177,56 @@ public partial class Comrade : CharacterBody3D, IDamageable
             _body.Ready = Mathf.MoveToward(_body.Ready, _foe != null || Orders != Order.Base ? 1 : 0, dt * 3);
             _body.AimPitch = _foe != null ? MathF.Atan2(_foe.GlobalPosition.Y + 1.2f - (GlobalPosition.Y + 1.5f), Flat(_foe.GlobalPosition - GlobalPosition)) : 0;
         }
+    }
+
+    // ================================================================= you're down: someone comes for you
+
+    /// <summary>The one squadmate on his way to patch you up (the others keep fighting).</summary>
+    private static Comrade? _rescuer;
+    /// <summary>Who's coming to patch you up (for the HUD).</summary>
+    public static string? Coming => _rescuer != null && IsInstanceValid(_rescuer) && !_rescuer.Down ? _rescuer.Person : null;
+    private float _reviveT;
+    private bool _toldYou;
+
+    private bool Rescue(float dt)
+    {
+        if (_rescuer != null && (!IsInstanceValid(_rescuer) || _rescuer.Down || _rescuer.Dead || !Player.Down)) _rescuer = null;
+        if (_rescuer == null && Flat(Player.GlobalPosition - GlobalPosition) < 200) _rescuer = this;
+        if (_rescuer != this) return false;
+        float d = Flat(Player.GlobalPosition - GlobalPosition);
+        if (!_toldYou)
+        {
+            _toldYou = true;
+            string[] lines = { "Hold on! I'm coming!", "Stay down! I've got you!", "Don't you dare die on me!", "Man down! Moving!" };
+            Say(lines[_rng.RandiRange(0, lines.Length - 1)]);
+        }
+        if (d > 1.3f)
+        {
+            _reviveT = 0;
+            Move(Player.GlobalPosition, d > 6 ? 4.6f : 2f, null, dt);
+            _crouch = Mathf.MoveToward(_crouch, d < 6 ? 1 : 0, dt * 4);
+        }
+        else
+        {
+            Move(GlobalPosition, 0, Player.GlobalPosition, dt);
+            _crouch = Mathf.MoveToward(_crouch, 1, dt * 4);
+            _reviveT += dt;
+            if (_reviveT >= 4)
+            {
+                Player.Revive(35);
+                string[] lines = { "You're good. Well. You're not dead.", "Up you get. Slowly.", "That'll hold. Don't make me do it again.", "Patched. You owe me a beer." };
+                Say(lines[_rng.RandiRange(0, lines.Length - 1)]);
+                GD.Print($"[squad] {Person} patched you up");
+                _rescuer = null; _reviveT = 0; _toldYou = false;
+            }
+        }
+        if (_body != null)
+        {
+            _body.Speed = new Vector2(Velocity.X, Velocity.Z).Length();
+            _body.Crouch = _crouch;
+            _body.Ready = Mathf.MoveToward(_body.Ready, 0, dt * 3);
+        }
+        return true;
     }
 
     /// <summary>His job at home.</summary>

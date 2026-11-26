@@ -196,7 +196,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         _wasSeen = _seen;
         _seen = false;
         LookForBodies();
-        if (Target.Dead || Target.Flying) { _sinceSeen += dt; Exposure = 0; Suspicion = Math.Max(0, Suspicion - dt * .1f); return; }
+        if (!Target.Spottable || Target.Flying) { _sinceSeen += dt; Exposure = 0; Suspicion = Math.Max(0, Suspicion - dt * .1f); return; }
 
         var eye = GlobalPosition + Vector3.Up * EyeHeight;
         var to = Target.Chest - eye;
@@ -267,7 +267,7 @@ public partial class Guard : CharacterBody3D, IDamageable
 
     private bool CoverStillGood(Vector3 spot)
     {
-        var threat = Target.Dead ? _lastKnown : (_seen ? Target.GlobalPosition : _lastKnown);
+        var threat = !Target.Spottable ? _lastKnown : (_seen ? Target.GlobalPosition : _lastKnown);
         return Foliage.RaycastTrunk(spot + Vector3.Up * EyeHeight, threat + Vector3.Up * 1.3f) != null;
     }
 
@@ -551,7 +551,7 @@ public partial class Guard : CharacterBody3D, IDamageable
         var from = _muzzle?.GlobalPosition ?? eye;
         var aim = _lastKnown + Vector3.Up * _rng.RandfRange(.4f, 1.6f) + new Vector3(_rng.RandfRange(-1.5f, 1.5f), 0, _rng.RandfRange(-1.5f, 1.5f));
         // Still there, and only leaves in the way (no trunk, no hill)? A small chance to hit.
-        if (Target.GlobalPosition.DistanceTo(_lastKnown) < 2.5f && !Target.Dead
+        if (Target.GlobalPosition.DistanceTo(_lastKnown) < 2.5f && Target.Spottable
             && Foliage.RaycastTrunk(eye, Target.Chest) == null && LineOfSight(eye, Target.Chest)
             && _rng.Randf() < .15f * DeadRecon.UI.Settings.GuardAccuracy)
         {

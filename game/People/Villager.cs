@@ -274,6 +274,7 @@ public partial class Villager : CharacterBody3D, IDamageable
         UpdateBubble(dt);
         if (State == Doing.Indoors) return;
         if (Lost) { BeLost(dt); return; }
+        if (Player.Down && Help(dt)) return;
 
         ReactToPlayer(dt);
         Vector3 target = GlobalPosition;
@@ -305,6 +306,49 @@ public partial class Villager : CharacterBody3D, IDamageable
         if (State == Doing.Working && _rng.Randf() < dt * .004f && Player.GlobalPosition.DistanceTo(GlobalPosition) < 25) Bark("work");
         if (State == Doing.Standing && Activity == "sell" && _rng.Randf() < dt * .006f && Player.GlobalPosition.DistanceTo(GlobalPosition) < 25) Bark("sell");
         Steps(dt);
+    }
+
+    // ================================================================= you're down and shouted: a friend comes
+
+    /// <summary>The villager on his way to help you (one at a time).</summary>
+    private static Villager? _helper;
+    public static bool Coming => _helper != null && IsInstanceValid(_helper);
+    private float _helpT;
+
+    /// <summary>You shouted for help, and this village likes you: the nearest one who heard comes and patches you up.
+    /// (A village that doesn't trust you keeps its head down.)</summary>
+    private bool Help(float dt)
+    {
+        if (_helper != null && (!IsInstanceValid(_helper) || _helper.State == Doing.Dead || !Player.Down)) _helper = null;
+        if (_helper == null)
+        {
+            if (Player.SinceShout > 40 || State is Doing.Panicking or Doing.Indoors || Site < 0) return false;
+            if (Flat(Player.GlobalPosition - GlobalPosition) > 80 || Support.LevelAt(Site) < Support.Level.Friendly) return false;
+            _helper = this;
+            Say(_rng.Randf() < .5f ? "I'm coming! Stay still!" : "Someone's hurt! Out of my way!");
+            GD.Print($"[down] a villager from site {Site} is coming");
+        }
+        if (_helper != this) return false;
+        float d = Flat(Player.GlobalPosition - GlobalPosition);
+        if (d > 1.3f) { _helpT = 0; Move(Player.GlobalPosition, d > 5 ? 3.6f : 1.6f, dt); _crouch = Mathf.MoveToward(_crouch, 0, dt * 3); }
+        else
+        {
+            Move(GlobalPosition, 0, dt);
+            _face = Player.GlobalPosition;
+            _crouch = Mathf.MoveToward(_crouch, 1, dt * 3);
+            _helpT += dt;
+            if (_helpT >= 6)
+            {
+                Player.Revive(25);
+                Say(_rng.Randf() < .5f ? "There. My grandmother taught me that. She'd want paying." : "Up. Slowly. You're too heavy to carry.");
+                Support.Change(Site, 2, "you owe them now, and that's friendship");
+                GD.Print("[down] a villager patched you up");
+                _helper = null; _helpT = 0;
+            }
+        }
+        if (_body != null) { _body.Crouch = _crouch; _body.Speed = new Vector2(Velocity.X, Velocity.Z).Length(); }
+        Steps(dt);
+        return true;
     }
 
     private void Move(Vector3 goal, float speed, float dt)

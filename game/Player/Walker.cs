@@ -20,7 +20,59 @@ public partial class Walker : CharacterBody3D, IDamageable
     public float Health { get; private set; } = MaxHealth;
     /// <summary>A saved operation coming back: how hurt you were.</summary>
     public void SetHealth(float h) => Health = Math.Clamp(h, 1, MaxHealth);
+    /// <summary>Out of the fight: down or gone. Guards stop tracking you (they think you're finished) unless
+    /// you give yourself away (<see cref="Spottable"/>).</summary>
     public bool Dead => Health <= 0;
+
+    // ---------------------------------------------------------------- going down (docs/MISSIONS_PLAN.md, section 6)
+    public enum WoundLevel { None, Light, Bad, Critical }
+    /// <summary>How bad it is, decided by how hard the hit that put you down was (and worse with every hit after).
+    /// Light: crawl, shoot, dress it yourself (H, might not hold), shout for help (F). Bad: crawl and shout.
+    /// Critical: you're out; someone else has to come.</summary>
+    public WoundLevel Wound { get; private set; }
+    /// <summary>On the ground, bleeding, still alive.</summary>
+    public bool Down => Health <= 0 && !Gone;
+    /// <summary>Bled out (or finished off): really dead. <see cref="Died"/> fires here.</summary>
+    public bool Gone { get; private set; }
+    public float BleedLeft { get; private set; }
+    /// <summary>Seconds since you last fired (a downed man who shoots is a target again for a while).</summary>
+    public float SinceShot { get; set; } = 99;
+    /// <summary>Seconds since you shouted for help (villagers who like you come running if they hear it).</summary>
+    public float SinceShout { get; private set; } = 99;
+    public bool Spottable => !Dead || (Down && SinceShot < 8);
+    public bool CanShoot => !Dead || (Down && Wound == WoundLevel.Light);
+    public bool CanCrawl => Down && Wound != WoundLevel.Critical && _selfDress <= 0;
+    public bool SelfDressing => _selfDress > 0;
+    public event Action? WentDown;
+    private float _selfDress, _shoutCool;
+    private bool _fWasDown;
+    private static float BleedFor(WoundLevel w) => w switch { WoundLevel.Light => 100, WoundLevel.Bad => 70, _ => 45 };
+
+    /// <summary>Someone patched you up (or you managed it yourself): back on your feet, barely.</summary>
+    public void Revive(float health)
+    {
+        if (!Down) return;
+        Health = Math.Clamp(health, 1, MaxHealth);
+        Wound = WoundLevel.None; BleedLeft = 0; _selfDress = 0; _deathTilt = 0;
+        GD.Print($"[down] back up with {Health:0} health");
+    }
+
+    /// <summary>Light wounds only: a dressing on yourself. Slow, and it might not hold.</summary>
+    public bool StartSelfDressing()
+    {
+        if (!Down || Wound != WoundLevel.Light || _selfDress > 0) return false;
+        _selfDress = 7;
+        return true;
+    }
+
+    private void Finish()
+    {
+        if (Gone) return;
+        Gone = true; BleedLeft = 0; _selfDress = 0;
+        Health = 0;
+        GD.Print("[down] gone");
+        Died?.Invoke();
+    }
     public bool Crouching { get; private set; }
     public bool Running { get; private set; }
     /// <summary>0..1 how much the last hit still flashes on screen.</summary>
@@ -114,9 +166,22 @@ public partial class Walker : CharacterBody3D, IDamageable
 
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
-        if (Dead || Flying) return;
+        if (Gone || Flying) return;
         HitsTaken++;
         if (Invulnerable) damage = 0;
+        if (Down)
+        {
+            // Hit again while down: one level worse; worse than critical is the end.
+            if (damage <= 0) return;
+            HurtFlash = 1;
+            if (Wound == WoundLevel.Critical) { Finish(); return; }
+            Wound++;
+            BleedLeft = Math.Min(BleedLeft, BleedFor(Wound));
+            _selfDress = 0;
+            GD.Print($"[down] hit again: {Wound}");
+            return;
+        }
+        float before = Health;
         Health = Math.Max(0, Health - damage);
         HurtFlash = 1;
         if (_thud == null) { _thud = new AudioStreamPlayer { Stream = DeadRecon.Combat.Effects.ThudSound(), VolumeDb = -4 }; AddChild(_thud); }
@@ -125,7 +190,16 @@ public partial class Walker : CharacterBody3D, IDamageable
         // A little flinch toward the shot.
         AddRecoil(Mathf.DegToRad(1.5f), Mathf.DegToRad((float)GD.RandRange(-1.5, 1.5)));
         Hurt?.Invoke(damage, from);
-        if (Dead) Died?.Invoke();
+        if (Health <= 0)
+        {
+            float over = damage - before;
+            if (over >= 150) { Wound = WoundLevel.Critical; Finish(); return; }   // nobody gets up from that
+            Wound = over < 20 ? WoundLevel.Light : over < 55 ? WoundLevel.Bad : WoundLevel.Critical;
+            BleedLeft = BleedFor(Wound);
+            _selfDress = 0;
+            GD.Print($"[down] went down: {Wound} wound, {BleedLeft:0} s");
+            WentDown?.Invoke();
+        }
     }
 
     /// <summary>Patched up (villagers, a medkit...).</summary>
@@ -134,6 +208,7 @@ public partial class Walker : CharacterBody3D, IDamageable
     public void Respawn(Vector3 at, float yawDegrees)
     {
         Health = MaxHealth;
+        Gone = false; Wound = WoundLevel.None; BleedLeft = 0; _selfDress = 0;
         HurtFlash = 0;
         _deathTilt = 0;
         Velocity = Vector3.Zero;
@@ -161,7 +236,7 @@ public partial class Walker : CharacterBody3D, IDamageable
             }
             if (key.PhysicalKeycode == Key.Alt && !Dead && !Flying) _crouchToggle = !_crouchToggle;
         }
-        else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured && !Dead)
+        else if (e is InputEventMouseMotion motion && Input.MouseMode == Input.MouseModeEnum.Captured && (!Dead || Down))
         {
             _yaw -= motion.Relative.X * Sensitivity * SensitivityScale * DeadRecon.UI.Settings.MouseSensitivity;
             _pitch = Math.Clamp(_pitch - motion.Relative.Y * Sensitivity * SensitivityScale * DeadRecon.UI.Settings.MouseSensitivity * (DeadRecon.UI.Settings.InvertY ? -1 : 1), -1.5f, 1.5f);
@@ -174,6 +249,49 @@ public partial class Walker : CharacterBody3D, IDamageable
         Rotation = new Vector3(0, _yaw, 0);
         // Aim offsets on top of where you're looking: scope sway (from the weapon) and the springy part of recoil.
         Camera.Rotation = new Vector3(_pitch + AimOffset.X + _recoilKick, AimOffset.Y + _recoilYaw, _deathTilt - _lean * LeanRoll);
+    }
+
+    /// <summary>Down: bleeding out, crawling (if you can), dressing it yourself, shouting for help.</summary>
+    private void DownTick(float dt)
+    {
+        BleedLeft -= dt;
+        if (BleedLeft <= 0) { Finish(); return; }
+        if (_selfDress > 0)
+        {
+            _selfDress -= dt;
+            if (_selfDress <= 0)
+            {
+                if (GD.Randf() < .55f) { Revive(20); DeadRecon.UI.Hud.Toast("It holds. Barely. Don't do anything brave."); }
+                else { BleedLeft += 20; DeadRecon.UI.Hud.Toast("It didn't hold. Keep pressure on it. That bought you a little time."); }
+            }
+        }
+        bool f = Input.IsPhysicalKeyPressed(Key.F) && Input.MouseMode == Input.MouseModeEnum.Captured;
+        if (f && !_fWasDown && Wound != WoundLevel.Critical && _shoutCool <= 0)
+        {
+            _shoutCool = 6; SinceShout = 0;
+            Hearing.Make(GlobalPosition, 45, this);   // everyone hears it: friends and the other sort
+            DeadRecon.UI.Hud.Toast("You shout for help. Everyone heard. Everyone.");
+        }
+        _fWasDown = f;
+        // Low on the ground; the critically wounded roll onto their side.
+        _eye = Mathf.MoveToward(_eye, Wound == WoundLevel.Critical ? .28f : .4f, dt * 2);
+        _deathTilt = Mathf.MoveToward(_deathTilt, Wound == WoundLevel.Critical ? .55f : .12f, dt * 1.5f);
+        Camera.Position = new Vector3(0, _eye, 0);
+        ApplyLook();
+        var v = Velocity;
+        v.X = 0; v.Z = 0;
+        if (CanCrawl)
+        {
+            var input = new Vector2(
+                (Input.IsPhysicalKeyPressed(Key.D) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.A) ? 1 : 0),
+                (Input.IsPhysicalKeyPressed(Key.S) ? 1 : 0) - (Input.IsPhysicalKeyPressed(Key.W) ? 1 : 0));
+            var wish = (Transform.Basis * new Vector3(input.X, 0, input.Y)).LimitLength(1) * (Wound == WoundLevel.Light ? .9f : .45f);
+            v.X = wish.X; v.Z = wish.Z;
+        }
+        v.Y = IsOnFloor() ? -.5f : v.Y - Gravity * dt;
+        Velocity = v;
+        MoveAndSlide();
+        GlobalPosition = DeadRecon.World.Foliage.PushOut(GlobalPosition, .35f);
     }
 
     // ---------------------------------------------------------------- lean and slide
@@ -284,8 +402,10 @@ public partial class Walker : CharacterBody3D, IDamageable
         _recoilKick *= spring;
         _recoilYaw *= spring;
         HurtFlash = Math.Max(0, HurtFlash - dt * 1.6f);
+        SinceShot += dt; SinceShout += dt; _shoutCool -= dt;
         if (Dead)
         {
+            if (Down) { DownTick(dt); return; }
             // Slump to the ground and stay there.
             _eye = Mathf.MoveToward(_eye, .35f, dt * 2);
             _deathTilt = Mathf.MoveToward(_deathTilt, .9f, dt * 1.5f);
