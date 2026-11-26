@@ -34,8 +34,11 @@ void fragment() {
 	ALBEDO = c;
 	ALPHA = tex.a * albedo.a;
 	ALPHA_SCISSOR_THRESHOLD = alpha_cut;
-	ROUGHNESS = mix(0.75, 0.3, wet);
-	SPECULAR = 0.35;
+	// Matte, with a faint sheen. NoorForm bends leaf normals toward a sphere round the crown (crownNormals), so any
+	// real shine became one big smooth highlight sliding over the whole crown as it swayed (Tom: "a wave going
+	// through the leaves"). Wet leaves shine a little more, still broad.
+	ROUGHNESS = mix(0.92, 0.6, wet);
+	SPECULAR = mix(0.06, 0.18, wet);
 	// Leaves are thin: light from behind comes through, yellow-green (the engine's backlight term).
 	BACKLIGHT = c * transmit_tint * translucency * 2.2;
 	// Seen from behind a card faces away: turn its normal round so both sides are lit as leaf fronts.
