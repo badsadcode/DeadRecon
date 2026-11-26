@@ -50,7 +50,16 @@ public partial class Mission : Node3D
     public bool HasKey { get; private set; }
     /// <summary>Intel ops: the intel has been sent from their radio (then come home).</summary>
     public bool Transmitted { get; private set; }
-    private bool _ordersFound, _reinforced;
+    private bool _reinforced;
+    /// <summary>Something loud happened that their radio will report (a transmission, an explosion): reinforcements.</summary>
+    public bool Loud { get; private set; }
+    /// <summary>The operation, step by step (see Steps.cs). Built from <see cref="Recipe"/> when the camp is built.</summary>
+    public readonly List<Step> Steps = new();
+    public int StepIndex { get; private set; }
+    /// <summary>The step you're on (null at briefing, after the end, or with no operation).</summary>
+    public Step? Now => State is Phase.Intel or Phase.Extract && StepIndex < Steps.Count ? Steps[StepIndex] : null;
+    /// <summary>People you're bringing out: if one dies, the operation fails; you can't finish without them.</summary>
+    public readonly List<(Villager V, string Name)> Escorts = new();
     private float _reinforceIn = -1;
     public int Reinforcements { get; private set; }
     /// <summary>Hour the operation starts (set by the scene from the seed).</summary>
@@ -65,27 +74,14 @@ public partial class Mission : Node3D
     /// <summary>The camp's radio desk (the sentry stands by it).</summary>
     public Vector3 Desk => _desk;
     public Vector3 Extraction { get; private set; }
-    public float SearchProgress { get; private set; }
+    public float SearchProgress { get; internal set; }
     public double Elapsed { get; private set; }
     /// <summary>Getting out means walking home (you have a base), not the helicopter.</summary>
     public bool ExtractHome { get; private set; }
     /// <summary>Close enough to the objective to work on it (hold F).</summary>
-    public bool NearIntel => State == Phase.Intel && HoldTarget is { } t && Player.GlobalPosition.DistanceTo(t) < 2.4f && !Player.Dead;
+    public bool NearIntel => Now is Hold h && h.Near;
     /// <summary>Where the current objective is, or null when there's nothing to go to.</summary>
-    public Vector3? Target => State switch
-    {
-        Phase.Intel => Kind switch
-        {
-            Op.Prisoner when !HasKey && _keyHolder != null && IsInstanceValid(_keyHolder) => _keyHolder.GlobalPosition,
-            Op.Intel when _intelTaken => new Vector3(_desk.X - .3f, _deskTop + .12f, _desk.Z),
-            Op.Officer => Officer is { } o && IsInstanceValid(o) ? o.GlobalPosition : Camp,
-            Op.Prisoner when _cageOpen => _prisoner?.GlobalPosition,
-            _ => IntelAt,
-        },
-        Phase.Extract when Kind == Op.Radio => null,
-        Phase.Extract => Extraction,
-        _ => null,
-    };
+    public Vector3? Target => Now?.Target;
 
     private const float CampRadius = 13, LzRadius = 11, ExtractRadius = 7;
     private RandomNumberGenerator _rng = new();
@@ -98,11 +94,9 @@ public partial class Mission : Node3D
     private string _why = "";
     private Vector3 _desk;
     private float _deskTop;
-    private float _fuse = -1;
     private readonly List<Node3D> _cache = new();
     private Villager? _prisoner;
     private Node3D? _cageDoor;
-    private bool _cageOpen;
     private string _prisonerName = "";
 
     public static readonly string[] Adjectives = { "Soggy", "Silent", "Muddy", "Crimson", "Sleepy", "Iron", "Damp", "Velvet", "Grumpy", "Thunder", "Lukewarm", "Humid", "Sticky", "Rusty", "Gentle", "Midnight" };
@@ -232,13 +226,119 @@ public partial class Mission : Node3D
 
         BuildCamp();
         if (!ExtractHome) BuildLandingZone();
+        foreach (var step in Recipe()) { step.M = this; Steps.Add(step); }
         Player.Died += () => { if (State is Phase.Intel or Phase.Extract) State = Phase.Failed; ShowPanel(); };
         if (SkipBriefing) Begin(); else ShowPanel();
     }
 
     public override void _ExitTree() { if (Current == this) Current = null; }
 
-    private void Begin() { State = Phase.Intel; Elapsed = 0; ShowPanel(); }
+    private void Begin() { State = Phase.Intel; Elapsed = 0; StepIndex = 0; StartStep(); ShowPanel(); }
+
+    // ================================================================= the steps of each kind of operation
+
+    /// <summary>The operation as a list of steps. A new kind of operation is a new list here (most of the work is
+    /// building its props in <see cref="BuildCamp"/>).</summary>
+    private IEnumerable<Step> Recipe()
+    {
+        var radioTop = new Vector3(_desk.X - .3f, _deskTop + .12f, _desk.Z);
+        switch (Kind)
+        {
+            case Op.Radio:
+                yield return new Hold
+                {
+                    At = () => IntelAt, What = "take the field radio from their camp", Label = "RADIO", Seconds = 2,
+                    Done = () =>
+                    {
+                        if (_intelProp != null) _intelProp.Visible = false;
+                        Kit.Current?.Add(ItemDef.FieldRadio, 1);
+                        Hud("Got the radio. Now find somewhere quiet to set it up.");
+                        GD.Print("[mission] took the radio");
+                    },
+                };
+                yield return new SetUpRadio();
+                break;
+            case Op.Intel:
+                yield return new Hold
+                {
+                    At = () => IntelAt, What = $"take {IntelName} from the camp radio desk", Label = "INTEL",
+                    Done = () =>
+                    {
+                        if (_intelProp != null) _intelProp.Visible = false;
+                        Kit.Current?.AddIntel(IntelName);
+                        Hud("Got it. HQ wants it now: send it from their own radio (hold F at it).");
+                        GD.Print($"[mission] took {IntelName}");
+                    },
+                };
+                yield return new Hold
+                {
+                    At = () => radioTop, What = "send it from their radio", Label = "RADIO", Seconds = 6, Doing = "sending",
+                    Done = () =>
+                    {
+                        Transmitted = true; Loud = true;
+                        Hud("Sent. And their radio told everyone who sent it. Run.");
+                        GD.Print("[mission] transmitted");
+                    },
+                };
+                yield return new GetOut();
+                break;
+            case Op.Cache:
+                yield return new Hold
+                {
+                    At = () => IntelAt, What = "plant a charge on the supply cache", Label = "CACHE", Seconds = 3.5f, Doing = "setting the charge",
+                    Done = () => { Hud("Charge set: 25 seconds. Walk away. Briskly."); GD.Print("[mission] charge planted"); },
+                };
+                yield return new Fuse { Seconds = 25, At = () => IntelAt, Boom = Explode };
+                yield return new GetOut();
+                break;
+            case Op.Officer:
+                yield return new Kill { Who = () => Officer, What = "take out the officer", Label = "OFFICER" };
+                yield return new SearchBody
+                {
+                    Who = () => Officer, What = "search the officer for his orders", Prompt = "Search him for his orders", Label = "ORDERS",
+                    Done = () => { Kit.Current?.AddIntel("the officer's orders"); Hud("Got his orders. Now get them home."); },
+                };
+                yield return new GetOut();
+                break;
+            case Op.Prisoner:
+                string first = _prisonerName.Split(' ')[^1];
+                yield return new SearchBody
+                {
+                    Who = () => _keyHolder, What = "get the cage keys from the sentry", Prompt = "Take his keys", Label = "KEYS",
+                    Done = () => { HasKey = true; Hud("Got the keys. Now the cage."); },
+                };
+                yield return new Hold
+                {
+                    At = () => IntelAt, What = $"open the cage, free {_prisonerName}", Label = "CAGE", Seconds = 2.5f, Doing = "picking the lock",
+                    Done = () =>
+                    {
+                        if (_cageDoor != null) _cageDoor.QueueFree();
+                        if (_prisoner != null) Escorts.Add((_prisoner, first));
+                        Hud("The lock gives. Talk to him (F).");
+                        GD.Print("[mission] cage open");
+                    },
+                };
+                yield return new Talk { Who = () => _prisoner, What = $"tell {_prisonerName} to follow you (F)" };
+                yield return new GetOut();
+                break;
+        }
+    }
+
+    private void StartStep()
+    {
+        SearchProgress = 0;
+        if (Now is not { } step) return;
+        step.Start();
+        if (step.IsExtract && State == Phase.Intel) { State = Phase.Extract; ShowPanel(); }
+    }
+
+    /// <summary>The current step is done: on to the next, or the end.</summary>
+    private void NextStep()
+    {
+        StepIndex++;
+        if (StepIndex >= Steps.Count) { Complete(); return; }
+        StartStep();
+    }
 
     private StandardMaterial3D Mat(float r, float g, float b, float rough = .9f) => new() { AlbedoColor = new Color(r, g, b), Roughness = rough };
 
@@ -488,21 +588,6 @@ public partial class Mission : Node3D
 
     // ================================================================= running
 
-    /// <summary>Where you stand to hold F for the objective (null when the objective isn't a hold-F one).</summary>
-    private Vector3? HoldTarget => Kind switch
-    {
-        Op.Officer => null,
-        Op.Prisoner when !HasKey => null,
-        Op.Intel when _intelTaken => new Vector3(_desk.X - .3f, _deskTop + .12f, _desk.Z),
-        Op.Cache when _fuse >= 0 => null,
-        Op.Prisoner when _cageOpen => null,
-        Op.None => null,
-        _ => IntelAt,
-    };
-
-    private float HoldTime => Kind switch { Op.Cache => 3.5f, Op.Prisoner => 2.5f, Op.Radio => 2f, Op.Intel when _intelTaken => 6f, _ => 1.6f };
-    private bool _intelTaken;
-
     public override void _Process(double delta)
     {
         if (Kind == Op.None) { _marker.Visible = false; return; }
@@ -510,70 +595,20 @@ public partial class Mission : Node3D
         _fireLight.LightEnergy = 2f + MathF.Sin((float)Time.GetTicksMsec() * .013f) * .3f + MathF.Sin((float)Time.GetTicksMsec() * .031f) * .2f;
         if (State is Phase.Intel or Phase.Extract) { Elapsed += delta; Reinforce(dt); }
 
-        if (State == Phase.Intel)
+        if (Now is { } step)
         {
-            if (HoldTarget is { } hold)
-            {
-                bool near = Player.GlobalPosition.DistanceTo(hold) < 2.4f && !Player.Dead;
-                bool holding = near && Input.IsPhysicalKeyPressed(Key.F);
-                SearchProgress = holding ? Math.Min(1, SearchProgress + dt / HoldTime) : Math.Max(0, SearchProgress - dt);
-                if (SearchProgress >= 1) { SearchProgress = 0; ObjectiveAction(); }
-            }
-            switch (Kind)
-            {
-                case Op.Cache when _fuse >= 0:
-                    _fuse -= dt;
-                    if (_fuse <= 0) Explode();
-                    break;
-                case Op.Officer when Officer is { } o && (!IsInstanceValid(o) || o.State == Guard.Mood.Dead) && !_ordersFound:
-                    if (Player.GlobalPosition.DistanceTo(o.GlobalPosition) < 2.4f)
-                    {
-                        DeadRecon.UI.Hud.Prompt("F   Search him for his orders");
-                        if (Input.IsPhysicalKeyPressed(Key.F) && Input.MouseMode == Input.MouseModeEnum.Captured)
-                        {
-                            _ordersFound = true;
-                            Kit.Current?.AddIntel("the officer's orders");
-                            Hud("Got his orders. Now get them home.");
-                            ToExtract();
-                        }
-                    }
-                    break;
-                case Op.Prisoner when !HasKey && _keyHolder is { } kh && (!IsInstanceValid(kh) || kh.State == Guard.Mood.Dead):
-                    if (Player.GlobalPosition.DistanceTo(kh.GlobalPosition) < 2.4f)
-                    {
-                        DeadRecon.UI.Hud.Prompt("F   Take his keys");
-                        if (Input.IsPhysicalKeyPressed(Key.F) && Input.MouseMode == Input.MouseModeEnum.Captured) { HasKey = true; Hud("Got the keys. Now the cage."); }
-                    }
-                    break;
-                case Op.Prisoner when _cageOpen && _prisoner is { } pr:
-                    if (!IsInstanceValid(pr) || pr.IsDead) { Fail($"{_prisonerName} didn't make it."); break; }
-                    if (pr.Following) ToExtract();
-                    break;
-            }
-        }
-        else if (State == Phase.Extract)
-        {
-            if (Kind == Op.Prisoner && _prisoner is { } pr && (!IsInstanceValid(pr) || pr.IsDead)) Fail($"{_prisonerName} didn't make it.");
-            else if (Kind == Op.Radio)
-            {
-                if (HomeBase.Saved != null) Complete();
-            }
-            else if (Flat(Player.GlobalPosition - Extraction) < (ExtractHome ? HomeBase.Radius : ExtractRadius) && !Player.Dead
-                     && (Kind != Op.Prisoner || _prisoner == null || Flat(_prisoner.GlobalPosition - Extraction) < (ExtractHome ? HomeBase.Radius + 4 : ExtractRadius + 6)))
-                Complete();
+            foreach (var (v, name) in Escorts)
+                if (!IsInstanceValid(v) || v.IsDead) { Fail($"{(v == _prisoner ? _prisonerName : name)} didn't make it."); break; }
+            if (Now == step && step.Tick(dt)) NextStep();
         }
 
-        var target = Target;
-        _marker.Visible = target != null && State is Phase.Intel or Phase.Extract;
-        if (target is { } t)
+        var now = Now;
+        var target = now?.Target;
+        _marker.Visible = target != null && now!.Marker != "";
+        if (target is { } t && now != null)
         {
-            _marker.GlobalPosition = t + Vector3.Up * (State == Phase.Intel ? (Kind == Op.Officer ? 2.4f : 1.4f) : 4f);
-            string label = State == Phase.Extract ? (ExtractHome ? "HOME" : "EXTRACT") : Kind switch
-            {
-                Op.Officer => "OFFICER", Op.Cache => _fuse >= 0 ? $"CHARGE  {_fuse:0} s" : "CACHE", Op.Prisoner => _cageOpen ? "PRISONER" : "CAGE",
-                Op.Radio => "RADIO", _ => "INTEL",
-            };
-            _marker.Text = $"{label}  {Player.GlobalPosition.DistanceTo(t):0} m";
+            _marker.GlobalPosition = t + Vector3.Up * now.MarkerLift;
+            _marker.Text = $"{now.Marker}  {Player.GlobalPosition.DistanceTo(t):0} m";
             _marker.PixelSize = .0008f * Player.Camera.Fov / 70f; // same size through the scope
         }
     }
@@ -591,7 +626,7 @@ public partial class Mission : Node3D
         if (_reinforced || SpawnGuard == null) return;
         if (_reinforceIn < 0)
         {
-            bool alarm = Guards.Exists(g => g.TimesAlerted > 0) || Transmitted || (Kind == Op.Cache && _fuse == -1 && _cache.Count == 0 && State == Phase.Extract);
+            bool alarm = Guards.Exists(g => g.TimesAlerted > 0) || Loud;
             if (alarm) { _reinforceIn = Transmitted ? 35 : _rng.RandfRange(45, 75); GD.Print($"[mission] alarm: reinforcements in {_reinforceIn:0} s"); }
             return;
         }
@@ -615,63 +650,10 @@ public partial class Mission : Node3D
         GD.Print($"[mission] {n} reinforcements sent");
     }
 
-    /// <summary>The hold-F part of the objective is done.</summary>
-    private void ObjectiveAction()
-    {
-        switch (Kind)
-        {
-            case Op.Cache:
-                _fuse = 25;
-                Hud("Charge set: 25 seconds. Walk away. Briskly.");
-                GD.Print("[mission] charge planted");
-                break;
-            case Op.Prisoner:
-                _cageOpen = true;
-                if (_cageDoor != null) _cageDoor.QueueFree();
-                Hud("The lock gives. Talk to him (F).");
-                GD.Print("[mission] cage open");
-                break;
-            case Op.Radio:
-                if (_intelProp != null) _intelProp.Visible = false;
-                Kit.Current?.Add(ItemDef.FieldRadio, 1);
-                Hud("Got the radio. Now find somewhere quiet to set it up.");
-                GD.Print("[mission] took the radio");
-                State = Phase.Extract;
-                ShowPanel();
-                break;
-            case Op.Intel when !_intelTaken:
-                if (_intelProp != null) _intelProp.Visible = false;
-                Kit.Current?.AddIntel(IntelName);
-                _intelTaken = true;
-                Hud("Got it. HQ wants it now: send it from their own radio (hold F at it).");
-                GD.Print($"[mission] took {IntelName}");
-                break;
-            case Op.Intel:
-                Transmitted = true;
-                Hud("Sent. And their radio told everyone who sent it. Run.");
-                GD.Print("[mission] transmitted");
-                ToExtract();
-                break;
-            default:
-                if (_intelProp != null) _intelProp.Visible = false;
-                Kit.Current?.AddIntel(IntelName);
-                GD.Print($"[mission] took {IntelName}");
-                ToExtract();
-                break;
-        }
-    }
-
-    private void ToExtract()
-    {
-        if (State != Phase.Intel) return;
-        State = Phase.Extract;
-        ShowPanel();
-    }
-
     /// <summary>The cache goes up: a flash, a boom, smoke; anyone too close goes with it.</summary>
     private void Explode()
     {
-        _fuse = -1;
+        Loud = true;
         var at = IntelAt;
         foreach (var n in _cache) if (IsInstanceValid(n)) n.QueueFree();
         _cache.Clear();
@@ -705,7 +687,6 @@ public partial class Mission : Node3D
         DeadRecon.Combat.Hearing.Make(at, 600, this);
         Hud("The cache is gone. Spectacularly.");
         GD.Print("[mission] cache destroyed");
-        ToExtract();
     }
 
     private void Complete()
@@ -756,15 +737,15 @@ public partial class Mission : Node3D
         }
     }
 
-    /// <summary>For tests: do the objective now (take the intel, plant and fire the charge, open the cage...).</summary>
+    /// <summary>For tests: do the objective now (every step up to getting out, except talking to people, which the
+    /// test does with F).</summary>
     public void TestTakeIntel()
     {
-        if (State != Phase.Intel) return;
-        if (Kind == Op.Officer) { Officer?.TakeHit(1000, Officer.GlobalPosition + Vector3.Up, Officer.GlobalPosition + Vector3.Right); _ordersFound = true; Kit.Current?.AddIntel("the officer's orders"); ToExtract(); return; }
-        if (Kind == Op.Prisoner) HasKey = true;
-        ObjectiveAction();
-        if (Kind == Op.Intel && State == Phase.Intel) ObjectiveAction();   // and transmit
-        if (Kind == Op.Cache) _fuse = .01f;
+        while (Now is { } step && !step.IsExtract && step.TestSkip)
+        {
+            step.TestDo();
+            if (State is Phase.Intel or Phase.Extract) NextStep();
+        }
     }
 
     /// <summary>For tests: the prisoner (Prisoner operations).</summary>
@@ -780,25 +761,14 @@ public partial class Mission : Node3D
         var target = Target ?? Camp;
         var d = target - Player.GlobalPosition;
         string dir = Compass(d);
-        string hold = SearchProgress > 0 ? $"   {(Kind == Op.Cache ? "setting the charge" : Kind == Op.Prisoner ? "picking the lock" : "taking it")}... {SearchProgress * 100:0}%"
+        string hold = SearchProgress > 0 && Now is Hold hs ? $"   {hs.Doing}... {SearchProgress * 100:0}%"
                     : NearIntel ? "   hold F" : "";
         return State switch
         {
             Phase.Briefing => $"{OperationName}: read the briefing (any key)",
-            Phase.Intel => Kind switch
-            {
-                Op.Radio => $"OBJECTIVE: take the field radio from their camp   {d.Length():0} m {dir}{hold}",
-                Op.Cache => _fuse >= 0 ? $"OBJECTIVE: get clear! The charge goes in {_fuse:0} s" : $"OBJECTIVE: plant a charge on the supply cache   {d.Length():0} m {dir}{hold}",
-                Op.Officer => Officer is { } of && (!IsInstanceValid(of) || of.State == Guard.Mood.Dead) ? "OBJECTIVE: search the officer for his orders (F)" : $"OBJECTIVE: take out the officer   {d.Length():0} m {dir}",
-                Op.Prisoner => _cageOpen ? $"OBJECTIVE: tell {_prisonerName} to follow you (F)"
-                             : !HasKey ? $"OBJECTIVE: get the cage keys from the sentry (step 1 of 3)   {(_keyHolder != null && IsInstanceValid(_keyHolder) ? $"{Player.GlobalPosition.DistanceTo(_keyHolder.GlobalPosition):0} m" : "")}"
-                             : $"OBJECTIVE: open the cage, free {_prisonerName} (step 2 of 3)   {d.Length():0} m {dir}{hold}",
-                Op.Intel when _intelTaken => $"OBJECTIVE: send it from their radio (step 2 of 3)   {d.Length():0} m {dir}{hold}",
-                _ => $"OBJECTIVE: take {IntelName} from the camp radio desk   {d.Length():0} m {dir}{hold}",
-            },
-            Phase.Extract when Kind == Op.Radio => "OBJECTIVE: set up the radio somewhere quiet (Tab, right-click the radio), 250 m+ from their camp",
-            Phase.Extract => (ExtractHome ? $"OBJECTIVE: get home   {Flat(d):0} m {dir}" : $"OBJECTIVE: reach extraction (green smoke)   {Flat(d):0} m {dir}") +
-                             (Kind == Op.Prisoner ? $"  (with {_prisonerName})" : ""),
+            Phase.Intel or Phase.Extract when Now is { } step =>
+                $"OBJECTIVE: {step.Text}{(Steps.Count > 2 ? $" (step {StepIndex + 1} of {Steps.Count})" : "")}" +
+                (step.ShowDistance ? $"   {Flat(d):0} m {dir}" : "") + hold,
             Phase.Complete => HomeBase.Saved != null ? "Operation complete. Pick the next one on your radio" : "Operation complete. Enter: next operation, wherever you are",
             _ => $"{OperationName}: FAILED. Enter: try again",
         };

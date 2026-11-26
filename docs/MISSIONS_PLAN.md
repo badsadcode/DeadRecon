@@ -259,7 +259,10 @@ The moment we want: lying in the ferns, hearing someone come through the vegetat
 
 Each step is playable on its own.
 
-1. **The step system.** Today's five operations rebuilt on reusable steps.
+1. **The step system.** Today's five operations rebuilt on reusable steps. **Done (2026-11-26):**
+   `game/Mission/Steps.cs` has the steps (hold F, kill, search a body, fuse, talk into following, go to, get out,
+   set up the radio); each operation is a list of them in `Mission.Recipe()`. People you bring out are escorts: if
+   one dies the operation fails. A new mission = its props + a new list.
 2. **Save anywhere (safe):** save and continue an operation, with world state, squad and progress.
 3. **Going down and being rescued** (wound levels, crawling, calling for help; squad, villagers and medic come for
    you). Lays the co-op rule's foundation.
