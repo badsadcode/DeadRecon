@@ -116,6 +116,8 @@ public partial class Animal : Node3D, IDamageable
         var me = GlobalPosition;
         float toPlayer = Player.Dead ? 999 : new Vector2(Player.GlobalPosition.X - me.X, Player.GlobalPosition.Z - me.Z).Length();
         bool sneaking = Player.Crouching && Player.Velocity.LengthSquared() < 2;
+        if (Def.Role == "army" && ArmyDog(dt, toPlayer)) return;
+        if (Def.Role == "pet" && PetDog(dt, toPlayer)) return;
 
         // Reactions to you.
         switch (Def.Role)
@@ -240,7 +242,7 @@ public partial class Animal : Node3D, IDamageable
 
     private void OnHeard(Vector3 at, float radius, Node source)
     {
-        if (Dead || source == this || radius < Hearing.Gunshot * .25f) return;
+        if (Dead || source == this || radius < Hearing.Gunshot * .25f || Def.Role is "army" or "pet") return;
         if (at.DistanceTo(GlobalPosition) > Math.Min(radius, 160)) return;
         if (Def.Role == "dog" && Site >= 0) { Call(); _callIn = 1; }
         if (Def.Role is "dog" or "livestock" && Site >= 0 && at.DistanceTo(GlobalPosition) > 40) return;   // used to it
@@ -250,6 +252,14 @@ public partial class Animal : Node3D, IDamageable
     public void TakeHit(float damage, Vector3 at, Vector3 from)
     {
         if (Dead) return;
+        if (Def.Role == "pet")
+        {
+            // Private Sausage does not die. He yelps, bolts, and comes back looking betrayed.
+            _voice.Stream = DeadRecon.Audio.Synth.Animal("yelp", 1); _voice.Play();
+            Spook(from); _hurtFor = 5;
+            DeadRecon.UI.Hud.Toast($"{Name2} yelps and bolts. He'll be back. He'll be sulking.");
+            return;
+        }
         _health -= damage;
         Effects.BloodHit(this, at, at - from);
         if (_health <= 0)
@@ -310,6 +320,9 @@ public partial class Wildlife : Node
         new("elephant", "res://assets/animals/elephant_13.glb", "prey", "jungle", 400, .7f, 3.5f, 30, 1, 3, "trumpet", .15f),
         new("tiger", "res://assets/animals/tiger_10.glb", "predator", "jungle", 150, .9f, 7, 0, 1, 1, "growl", .08f),
         new("leopard", "res://assets/animals/leopard_12.glb", "predator", "jungle", 90, .9f, 7, 0, 1, 1, "growl", .1f),
+        // Dogs with jobs (Dogs.cs): never spawned as wildlife or village animals.
+        new("army_dog", "res://assets/animals/doberman_9.glb", "army", "camp", 45, 1.1f, 7.8f, 0, Call: "bark", Weight: 0),
+        new("sausage", "res://assets/animals/beagle_5.glb", "pet", "home", 60, 1.2f, 7f, 0, Call: "bark", Weight: 0),
     };
 
     public static Dictionary<string, AnimalDef> Catalogue => _cat ??= DeadRecon.Data.Content.Get("animals", Builtin).Where(a => ResourceLoader.Exists(a.Model)).ToDictionary(a => a.Id);
@@ -321,7 +334,7 @@ public partial class Wildlife : Node
     private readonly RandomNumberGenerator _rng = new() { Seed = 777 };
     private const int WildGroups = 7;
 
-    public override void _Ready() { Current = this; Animal.All.Clear(); }
+    public override void _Ready() { Current = this; Animal.All.Clear(); Scent.Clear(); }
     public override void _ExitTree() { if (Current == this) Current = null; }
 
     /// <summary>A settlement's animals, round its yards (called when its people are populated).</summary>
@@ -363,8 +376,39 @@ public partial class Wildlife : Node
         return a;
     }
 
+    /// <summary>Your dog, once you have a home (a stray who decided you're his).</summary>
+    public Animal? Pet { get; private set; }
+    public static string PetName = "Private Sausage";
+
+    /// <summary>A camp's army dog: roams near the camp, smells you, barks the guards over, tracks your trail.</summary>
+    public Animal? CampDog(Vector3 post, int seed)
+    {
+        if (!Catalogue.TryGetValue("army_dog", out var def)) return null;
+        var a = Spawn(def, post, 9, -1, seed);
+        a.Post = post; a.Name2 = "the camp dog";
+        return a;
+    }
+
+    public Animal? SpawnPet(Vector3 at)
+    {
+        if (Pet != null && IsInstanceValid(Pet)) return Pet;
+        if (!Catalogue.TryGetValue("sausage", out var def)) return null;
+        Pet = Spawn(def, at, 4, -1, 4242);
+        Pet.Name2 = PetName;
+        GD.Print($"[dog] {PetName} is with you");
+        return Pet;
+    }
+
+    private bool _petChecked;
+
     public override void _Process(double delta)
     {
+        Scent.Update(Player, World, (float)delta);
+        if (!_petChecked && Player.IsInsideTree())
+        {
+            _petChecked = true;
+            if (DeadRecon.Base.HomeBase.Saved != null) SpawnPet(Player.GlobalPosition + new Vector3(1.5f, 0, 2));
+        }
         _since += delta;
         if (_since < 2) return;
         _since = 0;
@@ -380,7 +424,7 @@ public partial class Wildlife : Node
         UpdateSnakes(p);
         if (_wild.Count >= WildGroups || Catalogue.Count == 0) return;
         // A new group, out of sight, 120-300 m away, where that animal lives.
-        var wild = Catalogue.Values.Where(a => a.Where is "jungle" or "river").ToList();
+        var wild = Catalogue.Values.Where(a => a.Where is "jungle" or "river" && a.Weight > 0).ToList();
         if (wild.Count == 0) return;
         float total = wild.Sum(a => a.Weight), r = _rng.Randf() * total;
         var def = wild[^1];

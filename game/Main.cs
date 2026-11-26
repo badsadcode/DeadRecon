@@ -82,7 +82,7 @@ public partial class Main : Node3D
 		}
 		_world = BakedWorld.Load(dir);
 		_towns = Settlements.Load(dir, _world);
-		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest") || a.StartsWith("--moraletest") || a.StartsWith("--windtest"));
+		bool testing = args.Any(a => a.StartsWith("--shots") || a.StartsWith("--aitest") || a.StartsWith("--treetest") || a.StartsWith("--raintest") || a.StartsWith("--missiontest") || a.StartsWith("--squadtest") || a.StartsWith("--hudtest") || a.StartsWith("--chartest") || a.StartsWith("--ragdolltest") || a.StartsWith("--movetest") || a.StartsWith("--guntest") || a.StartsWith("--rangetest") || a.StartsWith("--daytest") || a.StartsWith("--villagetest") || a.StartsWith("--lifetest") || a.StartsWith("--kittest") || a.StartsWith("--patroltest") || a.StartsWith("--jobtest") || a.StartsWith("--basetest") || a.StartsWith("--optest") || a.StartsWith("--squadbasetest") || a.StartsWith("--risktest") || a.StartsWith("--zootest") || a.StartsWith("--snaketest") || a.StartsWith("--rocktest") || a.StartsWith("--resumetest") || a.StartsWith("--downtest") || a.StartsWith("--meleetest") || a.StartsWith("--rivertest") || a.StartsWith("--moraletest") || a.StartsWith("--windtest") || a.StartsWith("--dogtest"));
 		DeadRecon.People.Support.Persist = !testing;   // tests neither read nor write your saved villages
 		DeadRecon.People.Support.Load(_world.Name);
 		Foliage.Clear(); // static registry: a fresh run (new operation) re-registers what it plants
@@ -208,6 +208,10 @@ public partial class Main : Node3D
 		var sentryGuard = AddGuard(_mission.Desk + new Vector3(-.8f, 0, 1.6f), sentry: true);
 		if (op is Mission.Op.Officer or Mission.Op.Capture) _mission.Officer = sentryGuard;
 		sentryGuard.Leader = true;
+		// Most camps keep a dog (Recruit: some; Veteran: all).
+		float dogChance = DeadRecon.UI.Settings.Difficulty switch { DeadRecon.UI.Settings.Level.Recruit => .3f, DeadRecon.UI.Settings.Level.Veteran => 1f, _ => .6f };
+		var dogRng = new RandomNumberGenerator { Seed = (ulong)seed * 13 + 5 };
+		if ((dogRng.Randf() < dogChance && !testing) || Arg("dogtest", "") != "") _wildlife!.CampDog(_mission.Camp + new Vector3(-3, 0, 4), seed);
 		_mission.RadioOperator = sentryGuard;
 		if (op == Mission.Op.Prisoner) _mission.KeyHolder = sentryGuard;
 		// Bigger camps than before: a second patroller always, and a pair roving round the edge.
@@ -403,6 +407,7 @@ public partial class Main : Node3D
 		if (Arg("rivertest", "") != "") _ = RunRiverTest(Arg("rivertest", ""));
 		if (Arg("moraletest", "") != "") _ = RunMoraleTest(Arg("moraletest", ""));
 		if (Arg("windtest", "") != "") _ = RunWindTest(Arg("windtest", ""));
+		if (Arg("dogtest", "") != "") _ = RunDogTest(Arg("dogtest", ""));
 		string sbTest = Arg("squadbasetest", "");
 		if (sbTest != "") _ = RunSquadBaseTest(sbTest);
 		string opTest = Arg("optest", "");
@@ -1480,6 +1485,90 @@ public partial class Main : Node3D
 		await Shot("3_into_the_sun");
 		cam.LookAt(eye - (toSun with { Y = -.3f }).Normalized() * 3 + Vector3.Up * 1.5f);
 		await Shot("4_sun_behind_you");
+		GetTree().Quit();
+	}
+
+	/// <summary>Dogs: the camp dog smells you walking by and barks the guards over; you walk off, the camp searches,
+	/// the dog follows your trail; the trail crosses water and he loses it; Private Sausage growls at a guard.</summary>
+	private async Task RunDogTest(string dir)
+	{
+		Directory.CreateDirectory(dir);
+		async Task Frames(int n) { for (int f = 0; f < n; f++) await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame); }
+		async Task Seconds(double t) => await ToSignal(GetTree().CreateTimer(t), SceneTreeTimer.SignalName.Timeout);
+		async Task Shot(string name)
+		{
+			await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
+			GetViewport().GetTexture().GetImage().SavePng(Path.Combine(dir, name + ".png"));
+		}
+		// Walk (really: step every frame, so the scent trail is laid) from where you are toward a point.
+		async Task Walk(Vector3 to, float speed)
+		{
+			for (int f = 0; f < 3000; f++)
+			{
+				var p = _walker.GlobalPosition; var d = (to - p) with { Y = 0 };
+				if (d.Length() < .5f) break;
+				var next = p + d.Normalized() * Math.Min(d.Length(), speed / 60f);
+				_walker.GlobalPosition = next with { Y = _world.HeightAt(next.X, next.Z) + .05f };
+				await Frames(1);
+			}
+		}
+		_weather.AutoChange = false; _weather.SetNow(Weather.Kind.Clear);
+		_time.Frozen = true; _time.Hour = 10;
+		_walker.Invulnerable = true;
+		for (int f = 0; f < 1800 && (_waitingForGround || !_terrain.Settled); f++) await Frames(1);
+		var dog = DeadRecon.People.Animal.All.FirstOrDefault(a => a.Def.Role == "army");
+		if (dog == null) { GD.Print("[dogtest] no camp dog"); GetTree().Quit(); return; }
+		var camp = _mission.Camp;
+		_walker.SetFlying(true); _walker.GlobalPosition = camp + Vector3.Up * 20;
+		for (int f = 0; f < 1500 && (_trees.Pending > 0 || !_terrain.Settled || !_terrain.HasCollisionAt(camp)); f++) await Frames(1);
+		_walker.SetFlying(false);
+		// 1. Walk past at 40 m, then cut in to 14 m.
+		var start = camp + new Vector3(40, 0, -10); _walker.GlobalPosition = start with { Y = _world.HeightAt(start.X, start.Z) + .1f };
+		await Seconds(1);
+		GD.Print($"[dogtest] at 40 m: dog {dog.DogState}");
+		await Walk(dog.GlobalPosition + new Vector3(14, 0, 0), 4);
+		await Seconds(1.5);
+		int alerted = _mission.Guards.Count(g => g.State is Guard.Mood.Investigate or Guard.Mood.Alert or Guard.Mood.Search);
+		GD.Print($"[dogtest] at 14 m walking: dog {dog.DogState}, {dog.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m from you; guards coming: {alerted}/{_mission.Guards.Count}");
+		var cam = new Camera3D { Fov = 55 }; AddChild(cam);
+		cam.GlobalPosition = _walker.GlobalPosition + new Vector3(0, 1.6f, 0); cam.LookAt(dog.GlobalPosition + Vector3.Up * .5f); cam.MakeCurrent();
+		await Shot("1_dog");
+		_walker.Camera.MakeCurrent();
+		// 2. Walk away (a long, bending trail) out of his nose's reach; the camp searches; does he follow the trail?
+		var away = (_walker.GlobalPosition - camp) with { Y = 0 }; away = away.Normalized();
+		var side = new Vector3(-away.Z, 0, away.X);
+		var w1 = _walker.GlobalPosition + away * 35; var w2 = w1 + side * 30 + away * 15;
+		dog.SetProcess(false);   // he's busy barking at a tree; you slip away
+		await Walk(w1, 5); await Walk(w2, 5);
+		dog.SetProcess(true);
+		foreach (var g in _mission.Guards) g.Respond(_walker.GlobalPosition - away * 40);
+		await Seconds(1);
+		GD.Print($"[dogtest] you're {dog.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m off: dog {dog.DogState}; trail {DeadRecon.People.Scent.Marks.Count} marks");
+		float startD = dog.GlobalPosition.DistanceTo(_walker.GlobalPosition);
+		for (int k = 0; k < 30 && dog.DogState != "Alarm"; k++) await Seconds(1);
+		GD.Print($"[dogtest] after following: dog {dog.DogState}, {startD:0} m -> {dog.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m from you");
+		// 3. Again, but the trail crosses water.
+		var w3 = _walker.GlobalPosition + side * 45;
+		dog.SetProcess(false);
+		await Walk(w3, 7);
+		int mid = DeadRecon.People.Scent.Marks.Count - 12;
+		for (int k = mid; k < mid + 3; k++) DeadRecon.People.Scent.Marks[k].Water = true;
+		await Walk(w3 + side * 25, 7);
+		dog.SetProcess(true);
+		await Seconds(1.5);
+		GD.Print($"[dogtest] (dog now {dog.DogState})");
+		for (int k = 0; k < 40 && dog.DogState != "Lost" && dog.GlobalPosition.DistanceTo(_walker.GlobalPosition) > 15; k++) await Seconds(1);
+		GD.Print($"[dogtest] trail through water: dog {dog.DogState}, {dog.GlobalPosition.DistanceTo(_walker.GlobalPosition):0} m from you");
+		// 4. Private Sausage: a guard 25 m off.
+		var pet = _wildlife!.SpawnPet(_walker.GlobalPosition + new Vector3(2, 0, 2));
+		var guard = _mission.Guards.First(g => g.State != Guard.Mood.Dead);
+		guard.SetPhysicsProcess(false);
+		var gp = _walker.GlobalPosition + side * 25; guard.GlobalPosition = gp with { Y = _world.HeightAt(gp.X, gp.Z) };
+		dog.SetProcess(false);
+		await Seconds(7);
+		GD.Print($"[dogtest] Sausage {pet?.GlobalPosition.DistanceTo(_walker.GlobalPosition):0.0} m from you");
+		cam.GlobalPosition = _walker.GlobalPosition + new Vector3(0, 1.4f, 0) - side * 2.5f; cam.LookAt(pet!.GlobalPosition + Vector3.Up * .3f); cam.MakeCurrent();
+		await Shot("2_sausage");
 		GetTree().Quit();
 	}
 

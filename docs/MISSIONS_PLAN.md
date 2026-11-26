@@ -302,7 +302,14 @@ Each step is playable on its own.
    a man who doesn't answer gets searched for. On an alarm he has to reach the radio and talk for 6 s: stop him and
    no reinforcements come (explosions and transmissions are still heard far off). Not yet: a hands-up animation.
 6. **Dogs:** guard and patrol dogs, scent tracking (rain, wind, rivers), village dogs and strays. Then a dog of your
-   own. Then, inevitably, Private Sausage.
+   own. Then, inevitably, Private Sausage. **Done (2026-11-27), except patrol dogs on the roads:** `game/People/Dogs.cs`.
+   Your scent: a mark every 1.5 m, fading in ~4 min, up to 5x faster in rain; none in water. Camp dogs (doberman;
+   30/60/100% of camps by difficulty) smell you without needing to see you: 5 m crouched still, 9 crouched moving,
+   18 walking, 26 running, x1.6 downwind, halved in rain. They bark (guards hear it and come), run at you, snap
+   (10 damage), and chase up to 70 m from camp. When the camp searches, the dog follows your trail (up to 300 m)
+   until it smells you again, or the trail runs into water or fades. Village dogs already bark at strangers.
+   Private Sausage (beagle): with you once you have a home; quiet; growls and points at armed men within 35 m;
+   can't die (yelps, bolts, sulks, comes back).
 7. **Modifiers and bonus objectives** in the briefing.
 8. **Enemy upgrade 2:** pairs that cover and move, suppression, torches and flares at night.
 9. **Chains:** The Colonel, The Rice Tax, The Pilot.
