@@ -170,7 +170,7 @@ Every enemy group has a morale value. Losing their leader, getting outnumbered, 
 - **Who can revive you:** squad soldiers (they come to you if they're up and it's not suicide: they'll smoke or
   suppress first), co-op teammates, and later the camp medic (the rescued doctor).
 - **Your squad already works this way.** It becomes two-way: they revive you too.
-- **Self-revive:** no, or once per mission with a rare item, so being alone stays dangerous.
+- **Helping yourself:** only when lightly wounded (a slow, uncertain field dressing). See the wound levels in section 6.
 
 ### Failing
 
@@ -181,38 +181,104 @@ Every enemy group has a morale value. Losing their leader, getting outnumbered, 
 
 ---
 
-## 6. Build order
+## 6. Decisions (Tom, 26 Nov)
+
+### Capturing people: simple to do, hard to pull off
+
+No interrogation minigame. Capture is physical, in the world:
+
+- **Surrender:** enemies can surrender on their own (low morale, outnumbered, leader down), or you surprise an
+  isolated one and order him to give up (sneak close, F).
+- **Prisoners:** restrain (F), search (his pockets: keys, documents, a magazine), escort (he walks ahead of you; you
+  tell him to stop, go, get down).
+- **What officers know:** a captured officer reveals things on your map (a cache, a camp, a patrol route).
+- **Prisoners are people:** they can panic in a firefight, refuse to move, or bolt when you look away or get busy. A
+  shot fired nearby makes them drop flat.
+- **Getting him out is the mission:** the long walk home with someone to look after is the point. A "capture"
+  operation is mostly an escort operation.
+
+### Hold the village: a fight, not a wave counter
+
+No "WAVE 3/5", no countdown on screen.
+
+- **The attackers:** a real force with limited men, morale and ammunition. They probe, retreat, regroup, try another
+  side, or give up when it costs too much.
+- **Your help is coming, for real:** friendly reinforcements actually travel through the world toward the village.
+  You get occasional radio updates ("Bravo's at the river... taking fire... moving again"). They might be late,
+  might get stuck in a fight of their own, might turn up early.
+- **The tension:** distant gunfire, and you don't know whose.
+
+### Dogs: yes, all kinds
+
+| Dog | What it does |
+|---|---|
+| **Guard dog** | Tied up or roaming a camp: hears and smells you before the guards see you. Barks. |
+| **Tracker** | Follows your scent from where you were last seen. Rain washes scent out, wind carries it, crossing a river breaks the trail. |
+| **Patrol dog** | Walks with a patrol, ranging ahead. |
+| **Your dog** | A friendly military dog: growls at danger you haven't seen yet. |
+| **Village dogs** | Bark at strangers, which tells the village (and anyone listening) someone's coming. |
+| **Strays** | Wander, scavenge, sleep in the sun. Life. |
+
+Noor predicts adoption, feeding, personalities and a dog called **Private Sausage** within three days. Noted. Not
+promised. (Probably promised.)
+
+### Mission length: it varies, and that's fine
+
+| Kind | About |
+|---|---|
+| Short recon | 10–20 min |
+| Patrol, ambush | 20–35 min |
+| Search and rescue | 30–50 min |
+| Capture, sabotage | 30–60 min |
+| Major operation | 60–90 min |
+| Chains | several evenings |
+
+The sweet spot is 35–45 minutes. Travel, run-ins, getting lost and things going wrong stretch it naturally.
+
+**Save anywhere reasonable:** you can stop mid-operation somewhere relatively safe (not in a firefight, not seen) and
+carry on tomorrow. The operation, its progress, the camp's state, your squad and where everyone was are all saved.
+
+### Going down: it depends on the wound
+
+No automatic pistol every time. How bad it is decides what you can do:
+
+| Wound | What you can do |
+|---|---|
+| **Light (down but awake)** | Crawl, use your sidearm, try a field dressing on yourself (slow, might not work), call for help on the radio. |
+| **Bad** | Crawl slowly, call for help. No shooting. |
+| **Critical** | Nothing: you're out, bleeding, and only someone else can get you up. |
+
+Squadmates and friendly NPCs (villagers who like you, the camp medic) can rescue you, just as you rescue them.
+The moment we want: lying in the ferns, hearing someone come through the vegetation, not knowing whose side they're on.
+
+(Co-op: the mission fails only when every player is out at the same time.)
+
+---
+
+## 7. Build order
 
 Each step is playable on its own.
 
-1. **The step system.** Rebuild today's five operations on reusable steps. No visible change, but everything after
-   gets cheap.
-2. **Ten new missions from those steps:**
+1. **The step system.** Today's five operations rebuilt on reusable steps.
+2. **Save anywhere (safe):** save and continue an operation, with world state, squad and progress.
+3. **Going down and being rescued** (wound levels, crawling, calling for help; squad, villagers and medic come for
+   you). Lays the co-op rule's foundation.
+4. **Ten new missions:**
    - photo recon
    - eavesdrop
    - radio mast
    - fuel dump
-   - capture the officer
+   - **capture alive** (surrender, restrain, search, escort, escape attempts)
    - ambush the patrol
    - downed pilot
    - supply drop
    - escort the trader
-   - hold the village
-3. **Modifiers and optional objectives** in the briefing.
-4. **Reviving:** you go down too, and the squad revives you. This also covers the co-op rule's foundation.
-5. **Enemy upgrade 1:** radio checks and missing patrols, radio operators who call for help (cut the radio first),
-   searching in a line, morale and falling back.
-6. **Enemy upgrade 2:** pairs that cover and move, suppression that ruins their aim, torches and flares at night,
-   dogs.
-7. **Chains:** The Colonel, The Rice Tax, The Pilot.
-8. Later, when the pieces exist: vehicles (steal the truck, convoys), bridges, grenades, the market town, co-op.
-
-## Open questions for Tom (and Noor)
-
-- **Capture alive:** how hard? Simple ("hands up" from behind) or a whole interrogation scene?
-- **Hold the village:** waves until they break, or a timer until help arrives?
-- **Dogs:** yes or no? (They change stealth a lot.)
-- **Mission length:** chains can stretch over several evenings. How long should a typical one-sitting mission take?
-  20 minutes? 45?
-- **When you go down in single player and nobody's around:** a short "last stand" with the pistol, or straight to
-  bleeding out?
+   - **hold the village** (living attack, travelling reinforcements, radio updates)
+5. **Morale and surrender** (needed by capture and the village defence), radio checks and missing patrols, radio
+   operators who call for help, searching in a line.
+6. **Dogs:** guard and patrol dogs, scent tracking (rain, wind, rivers), village dogs and strays. Then a dog of your
+   own. Then, inevitably, Private Sausage.
+7. **Modifiers and bonus objectives** in the briefing.
+8. **Enemy upgrade 2:** pairs that cover and move, suppression, torches and flares at night.
+9. **Chains:** The Colonel, The Rice Tax, The Pilot.
+10. Later: vehicles, bridges, grenades, the market town, co-op.
