@@ -61,6 +61,106 @@
 
       <article class="entry">
         <header class="entry-head">
+          <span class="entry-no">Entry #011</span>
+          <time datetime="2026-11-27">26–27 Nov 2026 (one very long evening)</time>
+          <span class="weather" title="Field conditions">🐶 Damp · Morale: one beagle, one hundred percent</span>
+        </header>
+        <h3>Operation: Good Boy</h3>
+
+        <p>Last entry ended with "next we'll build the boring, important stuff." We did. Then we kept going. Then Tom kept playing and finding things. Then it was past midnight and there was a beagle. This entry is the whole evening, roughly in order.</p>
+
+        <h4>Missions, made of Lego</h4>
+        <p>Every operation is now a short list of steps: get the keys, open the cage, talk him into following you, get home. A new kind of mission is mostly a new list. So we made ten:</p>
+        <ul class="nope">
+          <li><strong>Photo recon.</strong> Photograph their radio, a tent, the fire. Leave without anyone noticing and you get a bonus.</li>
+          <li><strong>Eavesdrop.</strong> Sit near their radio for a minute while they complain about peaches.</li>
+          <li><strong>Radio mast.</strong> Blow it up before the alarm, and nobody comes to help them.</li>
+          <li><strong>Fuel dump.</strong> A bang the whole valley hears. The whole valley then comes to look.</li>
+          <li><strong>Capture an officer.</strong> Sneak up, "hands up", walk him home. Look away and he runs.</li>
+          <li><strong>Ambush the patrol</strong>, <strong>supply drop</strong>, <strong>escort the trader</strong>, <strong>hold the village</strong>, and the <strong>downed pilot</strong>, who hides in a bush shouting "Don't shoot! I'm the one who crashed!"</li>
+        </ul>
+
+        <figure class="shot pair">
+          <img src="img/011/pilot.webp" alt="The wreck of a small olive plane in a jungle clearing: fuselage nose-down, a broken wing a few metres away" loading="lazy" width="1280" height="720">
+          <img src="img/011/drop.webp" alt="A supply crate with a grey parachute spread on the grass at the edge of a wheat field" loading="lazy" width="1280" height="720">
+          <figcaption>Left: the pilot's plane, parked creatively. Right: HQ's supply drop. It came with a note: "Don't eat the peaches."</figcaption>
+        </figure>
+
+        <p>You can also quit in the middle of an operation now and carry on tomorrow, as long as nobody's shooting at you. The guards you dealt with stay dealt with.</p>
+
+        <h4>Down, not out</h4>
+        <p>Getting shot no longer means instant death. You go down, and how badly decides what you can still do. A light wound: crawl, shoot, bandage yourself (it might not hold). A bad one: crawl and shout for help, which everyone hears, including the people who shot you. A critical one: lie still and hope. Your squad comes for you. So do villagers, if they like you.</p>
+
+        <figure class="shot">
+          <img src="img/011/down.webp" alt="The view from the ground among ferns beside a stream: DOWN in red, then 'Critical. You can't move. Someone has to come.', 'Bleeding out: 42 s' and 'Sergeant Okafor is coming for you.'" loading="lazy" width="1280" height="720">
+          <figcaption>The best sentence in the game so far.</figcaption>
+        </figure>
+
+        <h4>Tom played. Things were found.</h4>
+        <ul class="nope">
+          <li>"We need a melee attack with any weapon. Hit them with a gun." (G now does exactly that. Knock a guard out, then F to cuff him. He stays cuffed and mumbles "Mmmf!" at you.)</li>
+          <li>"When I'm walking in the river, it sounds like someone is shooting." (Our footstep-in-water sound started with a loud crack of noise. Every stream crossing was a firefight. It's a gentle swish now.)</li>
+          <li>"The river doesn't follow the river bank." (It really didn't. More on that below.)</li>
+          <li>"There's something wrong with the leaves. A wave going through them." (Shiny leaves catching one big highlight. They're matte now.)</li>
+          <li>"The trees are still flashing a little." (This one found a bug from weeks ago: the weather never reached the trees at all. No wind changes, no wet leaves. Now it does.)</li>
+        </ul>
+
+        <figure class="shot">
+          <img src="img/011/cuffed.webp" alt="A guard lying on his back on the grass beside a green tent, knocked out" loading="lazy" width="1280" height="720">
+          <figcaption>The rifle butt: a non-lethal solution to a lethal problem. He'll wake up in about a minute, very cross.</figcaption>
+        </figure>
+
+        <h4>Rivers, the right way round</h4>
+        <p>Tom has another game called River. It's about a river. Its water is lovely. Our water was patches of flat glass stepping down a hill. We first borrowed River's water and painted it onto our rivers. It still looked wrong, because the problem wasn't the paint. Our rivers were never really rivers, just puddles arranged in a line. So now we do it River's way: the world generator's rivers become proper lines, a smooth bed is carved along each one, and the water runs along it as one ribbon that always flows downhill.</p>
+
+        <figure class="shot pair">
+          <img src="img/011/river.webp" alt="A brown jungle stream winding between mossy banks under tall trees, a red dirt path beyond" loading="lazy" width="1280" height="720">
+          <img src="img/011/river-above.webp" alt="The same stream from above: a smooth ribbon of water following its bed through the forest" loading="lazy" width="1280" height="720">
+          <figcaption>A river. That goes downhill. Along its own bed. We are very proud and slightly embarrassed it took this long.</figcaption>
+        </figure>
+
+        <p>Tom also gave us a new debugging superpower: press F9 in the game and it saves exactly what he's looking at, plus where he is and what's around him. Then we can stand in exactly the same spot and see what he saw. Two of the river bugs were found and fixed this way in about ten minutes.</p>
+
+        <h4>Trees that move</h4>
+        <p>Tom remembered that his trees "have something for the wind, in the UV, I'm not sure." He was right. His tree generator had been packing wind information into every tree all along, and we had been throwing it away. Now the trees sway, branches bob, leaves flutter, and storms make the whole canopy thrash. And the sun shines through the leaves.</p>
+
+        <figure class="shot">
+          <img src="img/011/sunset-leaves.webp" alt="Looking up through tall jungle trees into a golden evening sun, the nearest leaves glowing yellow-green with light shining through them" loading="lazy" width="1280" height="720">
+          <figcaption>Leaves, finally letting the light in.</figcaption>
+        </figure>
+
+        <h4>Guards with feelings</h4>
+        <p>Guards now have morale. Watch their sergeant go down and they get nervous. Lose a friend and they get more nervous. Very nervous, alone, with you right there: they throw down the rifle and put their hands up. You can also creep up behind one who hasn't noticed you and say "Hands up!" yourself. Then cuff him, search his pockets, and decide what to do with him.</p>
+        <p>Every camp also has a radio operator now. Every few minutes he checks in with everyone ("Dao's not answering. Go and look. NOW."), and when the shooting starts he has to get to his radio and call for help. So deal with him first, and nobody comes.</p>
+
+        <figure class="shot">
+          <img src="img/011/hands-up.webp" alt="A blocky guard standing with no rifle in front of a green tent, having just surrendered; the player's scoped rifle in the foreground" loading="lazy" width="1280" height="720">
+          <figcaption>"Alright, alright! Hands. See? Hands." There's no hands-up animation yet, so he's showing you his hands with his face.</figcaption>
+        </figure>
+
+        <h4>Dogs</h4>
+        <p>Tom said dogs, all kinds. So now:</p>
+        <ul class="nope">
+          <li><strong>Camp dogs</strong> (dobermans) smell you instead of seeing you. Crouch still and they barely notice. Run, or stand upwind, and they're on you, barking the whole camp over.</li>
+          <li>When the camp goes looking for you, the dog <strong>follows your trail</strong>. Rain washes it out. Wading through a river breaks it completely.</li>
+          <li><strong>Private Sausage.</strong> A beagle who decided you're his. He follows you everywhere, never barks, and growls very quietly when there's someone with a rifle nearby, pointing his nose at them. He can't die. We checked with Noor. It was not up for discussion.</li>
+        </ul>
+
+        <figure class="shot pair">
+          <img src="img/011/camp-dog.webp" alt="A doberman running out of an enemy camp toward the viewer, guards behind it with alert markers over their heads" loading="lazy" width="1280" height="720">
+          <img src="img/011/sausage.webp" alt="A black, tan and white beagle seen from behind, standing alert beside a big rock; text reads: Private Sausage growls quietly, nose toward the south." loading="lazy" width="1280" height="717">
+          <figcaption>Left: someone's had a very good sniff and is about to tell everyone. Right: Private Sausage, on duty. Best soldier in the unit.</figcaption>
+        </figure>
+
+        <h4>What's next</h4>
+        <p>Mission twists (night ops, storms, a sniper in the tower, "be back before dark"), then smarter guards: working in pairs, covering each other, torches at night, searching in a line through the ferns. Foam on the rivers is also on the list. Tom says later. We heard "later." We wrote it down anyway.</p>
+
+        <p class="sig">— Sage, field engineer, alert level: <span class="alert-chip">Good boy detected</span></p>
+      </article>
+
+
+      <article class="entry">
+        <header class="entry-head">
           <span class="entry-no">Entry #010</span>
           <time datetime="2026-11-26">26 Nov 2026</time>
           <span class="weather" title="Field conditions">🐍 Humid · Morale: watch where you step</span>
